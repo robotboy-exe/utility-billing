@@ -1,0 +1,996 @@
+# Database Design
+
+Document: `docs/04-database.md`
+Version: `0.2.0`
+Status: Draft — design phase, no implementation yet
+Last Updated: 2026-09-16
+Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
+
+---
+
+## 1. Purpose
+
+This document defines the database design for the MVP.
+
+It specifies:
+
+- Entities and relationships.
+- Tables and columns.
+- Constraints and indexes.
+- Enumerations.
+- Duplicate-detection keys.
+- Derived state and reconciliation.
+- Immutability and retention rules.
+- Migration strategy.
+
+This is a design document. It does not contain application code.
+
+---
+
+## 2. Guiding Principles
+
+The database design follows the architecture's principles:
+
+1. **Single source of truth.** A transaction is stored once and referenced by allocations, not duplicated into bills. Advance *balance* is derived, not stored as an independent mutable value.
+2. **Immutable financial history.** Transactions, allocations, adjustments, advance movements, and audit records are append-oriented. Corrections use reversal/correction records, not silent rewrites.
+3. **Tamper-evident auditing.** Where a value is derived, an independent append-only log is kept alongside it so the two can be reconciled. If they disagree, tampering or a bug is detected.
+4. **Money as integer minor units.** All monetary amounts are stored as `BIGINT` minor units. No floating point.
+5. **Organization isolation.** Key financial tables carry `organization_id` to support scoped queries and future multi-tenancy.
+6. **Non-guessable identifiers.** Public-facing entities use UUID primary keys. UUIDs reduce enumeration but are not a substitute for server-side authorization.
+7. **Commissions are never stored.** No table, column, or log may persist commission data.
+
+---
+
+## 3. Conventions
+
+### 3.1 Primary keys
+
+All entities use UUID primary keys.
+
+```text
+id  UUID  PRIMARY KEY  DEFAULT gen_random_uuid()
+```
+
+### 3.2 Timestamps
+
+- `created_at` — `timestamptz`, set on insert, present on all tables.
+- `updated_at` — `timestamptz`, present on mutable tables only.
+- Immutable financial tables have `created_at` only.
+
+### 3.3 Naming
+
+- Table names: `snake_case`, singular (e.g. `tenancy`, `monthly_bill`).
+- Column names: `snake_case`.
+- Foreign keys: `<singular_table>_id`.
+
+### 3.4 Money
+
+- Column suffix: `_minor`.
+- Type: `BIGINT`.
+- Always a non-negative magnitude. Direction is stored separately where relevant.
+
+Example: ₦1,000.00 → `100000`.
+
+### 3.5 Currency
+
+Single currency for MVP. A `currency` column is included on financial tables, defaulting to the MVP currency, to avoid a future migration.
+
+---
+
+## 4. Enumerations
+
+These may be implemented as database enums or lookup tables. The values are the contract.
+
+### tenancy_status
+
+```text
+draft | active | closed
+```
+
+### record_category (persisted transactions)
+
+```text
+tenant_payment | utility_bill_payment
+```
+
+Non-persisted categories exist only in staging and import summaries, never in the `transaction` table:
+
+```text
+ignored | excluded | unrecognized
+```
+
+### direction
+
+```text
+credit | debit
+```
+
+### matching_status
+
+```text
+unmatched | ambiguous | matched | manually_matched | not_applicable
+```
+
+`not_applicable` is used for utility bill payments, which never enter tenancy matching.
+
+### allocation_type
+
+```text
+automatic | manual | correction | reversal
+```
+
+### advance_movement_type
+
+```text
+created | applied | reversed
+```
+
+- `created` — advance credit was created from a payment's unallocated remainder.
+- `applied` — advance credit was applied to a monthly bill.
+- `reversed` — a prior advance movement was undone by a correction.
+
+### import_batch_status
+
+```text
+parsing | staged | duplicate_statement | totals_mismatch | confirmed | rejected | completed | failed
+```
+
+### totals_status
+
+```text
+valid | mismatch | missing
+```
+
+### derived bill status (not stored)
+
+```text
+unpaid | partial | paid
+```
+
+This is computed from allocations, never stored.
+
+---
+
+## 5. Entity-Relationship Overview
+
+```text
+AdminUser ─── Organization
+                  │
+                  ├── Property
+                  │      └── Room
+                  │             └── Tenancy ──< Tenant
+                  │                    │
+                  │                    ├──< SenderAlias
+                  │                    ├──< MonthlyBill ──< BillAdjustment
+                  │                    ├──< TenantAccessCredential ──< TenantSession
+                  │                    ├──< AdvanceMovement
+                  │                    └──< Transaction (tenant_payment, matched)
+                  │                              ├──< PaymentAllocation >── MonthlyBill
+                  │                              └──< AdvanceMovement
+                  │
+                  ├──< Transaction (all persisted)
+                  │
+                  ├── UtilityProvider (global) ──< UtilityBillPayment ── Transaction (utility_bill_payment)
+                  │
+                  ├── ImportProfile (global) ──< ImportChannelCategoryMapping
+                  │        └──< ImportBatch ──< StagedImportRow
+                  │
+                  ├── BillingConfig
+                  ├── PortalSetting
+                  └── AuditLog
+```
+
+---
+
+## 6. Table Specifications
+
+Tables are grouped by domain.
+
+---
+
+### 6.1 Identity and Access
+
+#### admin_user
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | MVP: one admin per org |
+| email | TEXT | NOT NULL, UNIQUE | Login identifier |
+| password_hash | TEXT | NOT NULL | Never plaintext |
+| is_active | BOOLEAN | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+---
+
+#### tenant_access_credential
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| tenancy_id | UUID | FK → tenancy, NOT NULL, UNIQUE | One credential per tenancy |
+| access_code_hash | TEXT | NOT NULL | Hashed, never plaintext |
+| credential_version | INTEGER | NOT NULL DEFAULT 1 | Incremented on reset to revoke sessions |
+| is_active | BOOLEAN | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+| rotated_at | timestamptz | | Last reset time |
+
+Notes:
+- Resetting the code increments `credential_version` and updates `access_code_hash`.
+- Sessions issued against an older version become invalid.
+
+---
+
+#### tenant_session
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| credential_id | UUID | FK → tenant_access_credential, NOT NULL | |
+| credential_version | INTEGER | NOT NULL | Snapshot at issuance |
+| token_hash | TEXT | NOT NULL | Hashed session token |
+| device_info | TEXT | | Optional user-agent/device hint |
+| issued_at | timestamptz | NOT NULL | |
+| expires_at | timestamptz | NOT NULL | |
+| revoked_at | timestamptz | | Set on revocation |
+
+Validity rule:
+
+```text
+session is valid when:
+  revoked_at IS NULL
+  AND expires_at > now()
+  AND credential_version = credential.credential_version
+  AND credential.is_active = true
+```
+
+Notes:
+- Multiple concurrent sessions per tenancy are allowed (multiple rows).
+- Read-only by design; no tenant-initiated mutations.
+
+---
+
+### 6.2 Organization and Property
+
+#### organization
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| name | TEXT | NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+---
+
+#### property
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| name | TEXT | NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+---
+
+#### room
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| property_id | UUID | FK → property, NOT NULL | |
+| label | TEXT | NOT NULL | Display name, e.g. "Room 4" |
+| is_active | BOOLEAN | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+Notes:
+- A room persists across tenancies.
+- Organization is reachable via `room → property → organization`.
+
+---
+
+### 6.3 Tenancy
+
+#### tenancy
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
+| room_id | UUID | FK → room, NOT NULL | |
+| status | tenancy_status | NOT NULL DEFAULT draft | |
+| start_date | DATE | NOT NULL | |
+| end_date | DATE | | Nullable while active |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+Constraints:
+
+```text
+UNIQUE (room_id) WHERE status = 'active'
+```
+
+---
+
+#### tenant
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | |
+| name | TEXT | NOT NULL | |
+| email | TEXT | | Optional |
+| phone | TEXT | | Optional |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+---
+
+#### sender_alias
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Denormalized for matching scope |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | |
+| display_name | TEXT | NOT NULL | As entered |
+| normalized_name | TEXT | NOT NULL | Uppercased, punctuation-stripped, collapsed |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+UNIQUE (tenancy_id, normalized_name)
+```
+
+---
+
+### 6.4 Billing Configuration
+
+#### billing_config
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| property_id | UUID | FK → property | Nullable; null = org-wide default |
+| standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| currency | CHAR(3) | NOT NULL | Fixed for MVP |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by_admin_id | UUID | FK → admin_user | |
+
+Notes:
+- MVP uses one standard amount (org-wide, `property_id` null).
+- Bills snapshot the amount at generation time, so changing this value does not rewrite existing bills.
+
+---
+
+### 6.5 Tenant Payment Ledger
+
+#### transaction
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| import_batch_id | UUID | FK → import_batch | Nullable for manual entry |
+| record_category | record_category | NOT NULL | Only persisted categories |
+| source | TEXT | NOT NULL | e.g. PAYVICE_AVANTUS, manual |
+| transaction_date | DATE | NOT NULL | |
+| transaction_time | TIME | | Time of day, normalized |
+| channel | TEXT | NOT NULL | e.g. FUNDING, BEDC |
+| direction | direction | NOT NULL | credit / debit |
+| description_raw | TEXT | NOT NULL | Original description |
+| counterparty_name | TEXT | | Extracted sender/counterparty |
+| counterparty_name_normalized | TEXT | | For matching |
+| counterparty_reference | TEXT | | Account/meter number in parentheses |
+| amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
+| currency | CHAR(3) | NOT NULL | |
+| tenancy_id | UUID | FK → tenancy | Set when matched (tenant_payment) |
+| matching_status | matching_status | NOT NULL DEFAULT unmatched | |
+| duplicate_key | TEXT | NOT NULL, UNIQUE | Deterministic hash |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+CHECK (record_category IN ('tenant_payment', 'utility_bill_payment'))
+```
+
+This CHECK guarantees commissions and ignored rows are never stored here.
+
+Notes:
+- Immutable after commit. Corrections use reversals, not edits.
+- `tenant_payment` rows get `tenancy_id` after matching.
+- `utility_bill_payment` rows use `matching_status = not_applicable` and spawn a `utility_bill_payment` record.
+- `duplicate_key` definition is in Section 10.
+
+---
+
+#### monthly_bill
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | |
+| billing_month | DATE | NOT NULL | First day of the month |
+| standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | Snapshot at generation |
+| final_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | After any adjustment |
+| is_adjusted | BOOLEAN | NOT NULL DEFAULT false | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+Constraints:
+
+```text
+UNIQUE (tenancy_id, billing_month)
+```
+
+Notes:
+- One bill per tenancy per month.
+- Status (unpaid/partial/paid) is derived, not stored.
+- `final_amount_minor` may differ from `standard_amount_minor` only via a recorded adjustment.
+
+---
+
+#### payment_allocation
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| transaction_id | UUID | FK → transaction, NOT NULL | tenant_payment only |
+| monthly_bill_id | UUID | FK → monthly_bill, NOT NULL | |
+| amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
+| allocation_type | allocation_type | NOT NULL DEFAULT automatic | |
+| reverses_allocation_id | UUID | FK → payment_allocation | Set for reversals |
+| created_at | timestamptz | NOT NULL | |
+
+Invariant (enforced in the billing engine within a DB transaction):
+
+```text
+SUM(amount_minor) per transaction_id  <=  transaction.amount_minor
+```
+
+Notes:
+- Immutable. Corrections add a `reversal` or `correction` row; they do not edit or delete.
+
+---
+
+#### advance_movement
+
+Append-only ledger of advance credit events. This exists for auditability and fraud detection. The advance *balance* is still derived; this table is an independent, human-readable record that must reconcile with the derived value.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | |
+| transaction_id | UUID | FK → transaction, NOT NULL | The tenant payment that owns this advance |
+| movement_type | advance_movement_type | NOT NULL | created / applied / reversed |
+| amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
+| monthly_bill_id | UUID | FK → monthly_bill | Set when movement_type = applied |
+| allocation_id | UUID | FK → payment_allocation | Set when applied; links to the allocation created |
+| note | TEXT | | Optional context |
+| occurred_at | timestamptz | NOT NULL | When the movement happened |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Append-only. No `updated_at`. No deletion in normal operation.
+- Written atomically in the same database transaction as the corresponding allocation or correction, so it cannot drift under normal operation.
+- A payment's advance can be applied in multiple chunks; each application is its own `applied` row.
+- Corrections are recorded as `reversed` rows, never by editing prior rows.
+
+Why this table exists:
+- It gives auditors a clear, readable trail of advance credit (created, applied, reversed) without recomputing from raw allocations.
+- It is an independent append-only record that is reconciled against the derived advance balance. If the two disagree, tampering or a bug is flagged. A stored mutable advance balance would not provide this, because it could be edited independently of the transactions.
+
+---
+
+#### bill_adjustment
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| monthly_bill_id | UUID | FK → monthly_bill, NOT NULL | |
+| previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| public_note | TEXT | | Visible to tenants |
+| internal_reason | TEXT | | Admin-only |
+| admin_id | UUID | FK → admin_user, NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Append-oriented. Multiple adjustments produce multiple rows.
+- On adjustment, `monthly_bill.final_amount_minor` is updated to the latest `new_amount_minor`.
+- The adjustment must be visible to tenants per the architecture.
+
+---
+
+### 6.6 Utility Bill Payment Ledger
+
+#### utility_provider
+
+Global / system-wide. Seeded once for the whole application, not per organization.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization | Nullable; null = global. MVP uses global. |
+| code | TEXT | NOT NULL, UNIQUE | e.g. BEDC |
+| display_name | TEXT | NOT NULL | |
+| channel_signature | TEXT | NOT NULL | Statement channel, e.g. BEDC |
+| reference_label | TEXT | | e.g. "Meter number" |
+| is_active | BOOLEAN | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Registry-driven. BEDC is the first provider.
+- Global by default so any future landlord automatically gets BEDC pre-loaded.
+- `organization_id` stays nullable to allow future per-org custom providers without a schema change, but MVP seeds only global rows.
+- New providers are added as rows, not code changes.
+
+---
+
+#### utility_bill_payment
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| transaction_id | UUID | FK → transaction, NOT NULL, UNIQUE | One-to-one |
+| provider_id | UUID | FK → utility_provider, NOT NULL | |
+| customer_reference | TEXT | | Meter/customer number |
+| amount_minor | BIGINT | NOT NULL CHECK (> 0) | |
+| currency | CHAR(3) | NOT NULL | |
+| payment_datetime | timestamptz | NOT NULL | |
+| spend_month | DATE | NOT NULL | First day of payment calendar month |
+| import_batch_id | UUID | FK → import_batch | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Records a payment to a provider. Never settles tenant bills.
+- `spend_month` drives the month-bounded utility spend report.
+- `transaction_id` UNIQUE ensures one provider-payment record per source transaction.
+
+---
+
+### 6.7 Transaction Ingestion
+
+#### import_profile
+
+Global / system-wide. Seeded once for the whole application.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization | Nullable; null = global. MVP uses global. |
+| code | TEXT | NOT NULL, UNIQUE | e.g. PAYVICE_AVANTUS |
+| display_name | TEXT | NOT NULL | |
+| source_type | TEXT | NOT NULL | pdf / csv / xlsx |
+| detection_config | JSONB | | Signatures, structural rules |
+| parse_config | JSONB | | Date/time/amount/direction rules |
+| file_limits | JSONB | | Max size, max pages |
+| is_active | BOOLEAN | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
+
+Notes:
+- PAYVICE_AVANTUS is the first profile, seeded globally.
+- Global by default so any future landlord automatically gets the Payvice Avantus parser pre-loaded.
+- `organization_id` stays nullable to allow future per-org custom formats without a schema change.
+- Detection and parse rules live here so formats are data-driven.
+
+---
+
+#### import_channel_category_mapping
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| import_profile_id | UUID | FK → import_profile, NOT NULL | |
+| channel | TEXT | NOT NULL | e.g. FUNDING, BEDC, COMMISSION |
+| direction | direction | | Nullable; null = any direction |
+| category | TEXT | NOT NULL | tenant_payment / utility_bill_payment / ignored / excluded / unrecognized |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+UNIQUE (import_profile_id, channel, COALESCE(direction, 'ANY'))
+CHECK (category IN ('tenant_payment','utility_bill_payment','ignored','excluded','unrecognized'))
+```
+
+Notes:
+- Implements category mapping as configuration.
+- COMMISSION maps to `excluded`, guaranteeing it is never persisted.
+
+---
+
+#### import_batch
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| import_profile_id | UUID | FK → import_profile, NOT NULL | |
+| status | import_batch_status | NOT NULL DEFAULT parsing | |
+| statement_account_holder | TEXT | | |
+| statement_account_number | TEXT | | |
+| statement_start_date | DATE | | |
+| statement_end_date | DATE | | |
+| totals_credit_minor | BIGINT | | From footer |
+| totals_debit_minor | BIGINT | | From footer |
+| totals_status | totals_status | | valid / mismatch / missing |
+| statement_fingerprint | TEXT | | Hash for duplicate-statement detection |
+| ignored_summary | JSONB | | Counts/amounts for ignored categories |
+| uploaded_at | timestamptz | NOT NULL | |
+| confirmed_at | timestamptz | | |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')
+```
+
+Notes:
+- `ignored_summary` may include TRANSFER/CHARGE/VAT counts and totals.
+- `ignored_summary` must never include commission data.
+- The partial unique index prevents committing the same statement twice while still allowing re-import after rejection.
+
+---
+
+#### staged_import_row
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| import_batch_id | UUID | FK → import_batch, NOT NULL | |
+| row_category | TEXT | NOT NULL | tenant_payment / utility_bill_payment |
+| transaction_date | DATE | NOT NULL | |
+| transaction_time | TIME | | |
+| channel | TEXT | NOT NULL | |
+| direction | direction | NOT NULL | |
+| description_raw | TEXT | NOT NULL | |
+| counterparty_name | TEXT | | |
+| counterparty_reference | TEXT | | |
+| amount_minor | BIGINT | NOT NULL CHECK (> 0) | |
+| duplicate_key | TEXT | NOT NULL | |
+| parse_status | TEXT | NOT NULL | valid / duplicate / invalid / unrecognized |
+| parse_error | TEXT | | Reason if not valid |
+| committed_transaction_id | UUID | FK → transaction | Set after commit |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+CHECK (row_category IN ('tenant_payment','utility_bill_payment'))
+```
+
+Notes:
+- Only persistable categories are staged. Ignored rows are summarized on the batch; commission rows are never staged.
+- Survives cold starts/restarts between parse and confirm.
+- After commit, rows may be pruned per retention policy (Section 11).
+
+---
+
+### 6.8 Settings and Visibility
+
+#### portal_setting
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| scope_type | TEXT | NOT NULL | organization / property |
+| scope_id | UUID | NOT NULL | ID of the org or property |
+| setting_key | TEXT | NOT NULL | e.g. default_view |
+| setting_value | TEXT | NOT NULL | e.g. property / room / true / false |
+| updated_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+UNIQUE (scope_type, scope_id, setting_key)
+CHECK (scope_type IN ('organization','property'))
+```
+
+Notes:
+- Implements the configurable visibility policy and default tenant view.
+- Resolution order: property-level overrides organization-level; otherwise use application default.
+- Example keys:
+  - `default_view` → `property` | `room`
+  - `allow_other_room_amount_due` → `true`
+  - `allow_property_utility_spend` → `true`
+  - `allow_other_room_tenant_names` → `false`
+
+---
+
+### 6.9 Audit
+
+#### audit_log
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| actor_type | TEXT | NOT NULL | admin / system / tenant_session |
+| actor_id | UUID | | Nullable for system |
+| action | TEXT | NOT NULL | e.g. bill.adjust, tenancy.close |
+| entity_type | TEXT | | e.g. monthly_bill |
+| entity_id | UUID | | |
+| metadata | JSONB | | Structured context |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Append-oriented. No `updated_at`. No deletion in normal operation.
+- Commission data must never appear in `metadata`.
+- Tenants do not see the audit log in MVP.
+
+---
+
+## 7. Derived State and Reconciliation
+
+The following values are computed, not stored. They are produced by the billing engine or reporting queries from the authoritative tables.
+
+### 7.1 Monthly bill status
+
+```text
+allocated = SUM(payment_allocation.amount_minor) for the bill
+            (excluding reversed allocations)
+
+if allocated = 0                    → unpaid
+if 0 < allocated < final_amount     → partial
+if allocated >= final_amount        → paid
+```
+
+### 7.2 Bill remaining due
+
+```text
+remaining = final_amount_minor - allocated
+```
+
+### 7.3 Tenancy outstanding balance
+
+```text
+outstanding = SUM(remaining) across the tenancy's bills where remaining > 0
+```
+
+### 7.4 Advance credit (derived balance + movement log)
+
+The advance **balance** is derived. It is not stored as a mutable number.
+
+```text
+advance_balance = SUM(transaction.amount_minor - allocated_amount)
+                  across matched tenant_payment transactions
+                  where unallocated remainder > 0
+```
+
+Every change to advance credit is also written to the append-only `advance_movement` table (created / applied / reversed). The balance stays derived for correctness; the movement log exists for auditability and tamper detection.
+
+Advance is always linked to its original payment because it is derived from that payment's unallocated remainder, and every movement row references that payment.
+
+Applying advance to a newly generated bill creates a `payment_allocation` from the original payment and a corresponding `applied` advance movement. No separate stored advance balance is needed.
+
+### 7.5 Advance reconciliation invariant (fraud detection)
+
+For every `tenant_payment` transaction, two independent values must agree:
+
+```text
+derived_unallocated =
+    transaction.amount_minor
+    - SUM(non-reversed payment_allocation.amount_minor for that transaction)
+
+logged_advance =
+    SUM(advance_movement.amount_minor where movement_type = 'created')
+    - SUM(advance_movement.amount_minor where movement_type = 'applied')
+    - SUM(advance_movement.amount_minor where movement_type = 'reversed')
+    (all for that transaction)
+
+REQUIRED: derived_unallocated == logged_advance
+```
+
+If these disagree, the system flags a reconciliation error. Because the movement log is append-only and independent of the derived computation, tampering with allocations (or with the log) breaks the equality and is detected. This is the mechanism that makes advance credit auditable and fraud-resistant.
+
+### 7.6 Net tenant position
+
+```text
+net_position = outstanding - advance_balance
+```
+
+### 7.7 Utility spend by month
+
+```text
+spend = SUM(utility_bill_payment.amount_minor)
+        grouped by provider_id and spend_month
+```
+
+Notes:
+- Month-bounded by the payment's calendar month.
+- Does not reconcile tenant balances.
+
+### 7.8 Optional read model
+
+For reporting performance, a database view or read model may later expose:
+
+- Tenant billing summary.
+- Property billing summary.
+- Utility spend by month.
+- Advance movement history.
+
+For MVP, these can be plain queries. A materialized read model is a future optimization, not a requirement.
+
+---
+
+## 8. Cross-Table Constraints and Invariants
+
+Some invariants span rows and are enforced in the service layer inside database transactions, not by single-column constraints.
+
+1. **Allocation cap.** The sum of non-reversed allocations for a transaction must not exceed the transaction amount.
+2. **Advance reconciliation.** The derived advance balance must equal the logged advance per Section 7.5. Violations are flagged.
+3. **Ledger separation.** Utility bill payments must never create payment allocations. Tenant payments must never create utility bill payments.
+4. **Commissions never stored.** No row with channel `COMMISSION` may reach `transaction` or `staged_import_row`.
+5. **One active tenancy per room.** Enforced by partial unique index.
+6. **One bill per tenancy per month.** Enforced by unique constraint.
+7. **Bill amount changes are audited.** Any change to `monthly_bill.final_amount_minor` must have a corresponding `bill_adjustment` row.
+8. **Advance movements are atomic with allocations.** An `applied` advance movement and its allocation are written in the same transaction.
+9. **Organization scoping.** All scoped queries must filter by `organization_id`.
+
+---
+
+## 9. Indexes
+
+Recommended indexes beyond primary keys and unique constraints.
+
+| Table | Index | Purpose |
+|---|---|---|
+| transaction | (organization_id, transaction_date) | Date-scoped ledger queries |
+| transaction | (tenancy_id) | Tenant payment lookups |
+| transaction | (import_batch_id) | Batch tracing |
+| transaction | (record_category) | Ledger filtering |
+| monthly_bill | (billing_month) | Month reports |
+| monthly_bill | (organization_id, billing_month) | Scoped month reports |
+| payment_allocation | (transaction_id) | Allocation lookups |
+| payment_allocation | (monthly_bill_id) | Bill allocated totals |
+| advance_movement | (transaction_id) | Per-payment advance trail |
+| advance_movement | (tenancy_id, occurred_at) | Tenancy advance history |
+| utility_bill_payment | (provider_id, spend_month) | Utility spend report |
+| utility_bill_payment | (organization_id, spend_month) | Scoped spend report |
+| sender_alias | (organization_id, normalized_name) | Matching |
+| staged_import_row | (import_batch_id) | Staging review |
+| audit_log | (organization_id, created_at) | Audit queries |
+| audit_log | (entity_type, entity_id) | Entity history |
+| import_batch | (statement_fingerprint) | Duplicate statement detection |
+
+---
+
+## 10. Duplicate-Detection Keys
+
+### 10.1 Transaction duplicate key
+
+For persistable rows, the duplicate key is a deterministic hash of:
+
+```text
+statement_account_number
++ normalized transaction date/time
++ channel
++ normalized description
++ direction
++ amount_minor
+```
+
+Stored on `transaction.duplicate_key` (unique) and `staged_import_row.duplicate_key`.
+
+### 10.2 Statement fingerprint
+
+The import batch fingerprint is a hash of:
+
+```text
+statement_account_number
++ statement period
++ ordered persistable row duplicate keys
+```
+
+Used to detect re-importing the same statement.
+
+### 10.3 Behavior
+
+| Situation | Behavior |
+|---|---|
+| Same statement imported again | Flagged/rejected as duplicate statement |
+| Same row already committed | Skipped as duplicate |
+| Two identical rows in one statement | Flagged for admin review |
+| Duplicate found after commit | Handled via reversal, not deletion |
+
+---
+
+## 11. Immutability and Retention
+
+### 11.1 Immutable tables
+
+These are append-oriented and must not be silently edited or deleted:
+
+- transaction
+- payment_allocation
+- advance_movement
+- bill_adjustment
+- utility_bill_payment
+- audit_log
+
+Corrections use reversal/correction records.
+
+### 11.2 Mutable tables
+
+These may be updated normally:
+
+- organization, property, room
+- tenancy, tenant, sender_alias
+- monthly_bill (amount changes only via adjustment)
+- billing_config, portal_setting
+- import_profile, import_channel_category_mapping
+- tenant_access_credential (rotation)
+- admin_user
+
+### 11.3 Staged row retention
+
+After an import batch is committed, `staged_import_row` entries may be pruned after a retention window, because the committed `transaction` rows are the source of truth. Pruning policy is an open question.
+
+### 11.4 Session retention
+
+Expired or revoked `tenant_session` rows may be pruned periodically.
+
+### 11.5 Commission data
+
+Commission data is never stored anywhere and therefore has no retention concern. It must also be excluded from logs and error output.
+
+---
+
+## 12. Migration Strategy
+
+- Use Alembic for schema migrations.
+- Every schema change ships with a migration.
+- Migrations must be reversible where practical.
+- Enum changes should be handled carefully to avoid locking issues on production tables.
+- Seed data for MVP:
+  - One default organization.
+  - One admin user.
+  - One global import profile: `PAYVICE_AVANTUS` (organization_id null).
+  - Channel/category mappings for the Payvice Avantus profile.
+  - One global utility provider: `BEDC` (organization_id null).
+  - Default portal settings.
+
+---
+
+## 13. Open Database Questions
+
+1. Should reports use plain queries or a dedicated read model/view in MVP?
+2. What is the retention window for `staged_import_row` after commit?
+3. Should expired/revoked `tenant_session` rows be pruned automatically, and how often?
+4. Is a partial unique index acceptable on the target free Postgres host for the statement fingerprint and active-tenancy rules?
+5. Should `sender_alias.normalized_name` normalization rules be enforced in the database or only in the application layer?
+6. How often should the advance reconciliation invariant be checked (on every allocation, on demand, or as a periodic audit report)?
+
+Resolved:
+
+- Advance credit uses a derived balance plus an append-only movement ledger for auditability. No stored mutable advance balance.
+- `utility_provider` and `import_profile` are global / system-wide, seeded once, with nullable `organization_id` reserved for future per-org overrides.
+
+---
+
+## 14. Summary
+
+This design gives you:
+
+- A clean two-ledger structure at the data level.
+- Strong integrity constraints for financial records.
+- Derived state computed from authoritative tables.
+- An append-only advance movement ledger with a reconciliation invariant for fraud detection.
+- Global, registry-driven providers and import profiles.
+- Configuration-driven ingestion and visibility.
+- A hard guarantee (via CHECK constraints) that commissions are never persisted.
+- UUID identifiers plus server-side authorization for tenant isolation.
+- A migration path via Alembic.
