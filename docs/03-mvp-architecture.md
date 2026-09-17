@@ -4,6 +4,7 @@ Document: `docs/03-mvp-architecture.md`
 Version: `0.8.0`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-16
+Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`, and absorbs utility-billing-arch.md (architecture.md v0.1.0)
 
 ## Document Lineage
@@ -318,8 +319,8 @@ The MVP must therefore be designed as follows:
 
 | Constraint | MVP design response |
 |---|---|
-| No reliable background jobs | Billing generation, imports, and matching are manually triggered by the admin. |
-| No reliable scheduled tasks | Monthly bills are generated manually, not automatically. |
+| No reliable background jobs | Imports and matching are manually triggered by the admin. Bill generation is lazy/rolling and happens synchronously in response to real usage, so no background worker is needed. |
+| No reliable scheduled tasks | Monthly bills are generated lazily/on-demand the first time the system needs them (dashboard load, payment processing, report request), not by a scheduled task. |
 | Ephemeral filesystem | Do not rely on uploaded files remaining on the server. Store normalized transaction records in the database. |
 | Limited database storage | Keep financial records normalized and compact. Avoid storing original statement files unless explicitly required. |
 | Limited request timeout | Imports must be small enough to process synchronously. PDF parsing is bounded by file size and page limits. |
@@ -852,7 +853,7 @@ Does not reconcile tenant balances.
 - **Money Handling:** Single currency. All amounts stored as `BIGINT` minor units (e.g., ₦1,000 = 100000). No floating-point math.
 - **Immutability:** Financial records (transactions, allocations, advance movements, audit logs) are append-only. Corrections use reversal/correction records, never silent rewrites.
 - **Auditability:** Lightweight, append-only audit log for admin/system actions. Commission data is never logged. Tenants do not see the audit log.
-- *Detailed security implementations belong in `09-security.md`.*
+- *Detailed security implementations will belong in the planned `09-security.md` (see Section 17).*
 
 ---
 

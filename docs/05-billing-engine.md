@@ -8,7 +8,7 @@ Related documents: `03-mvp-architecture.md`, `06-transaction-ingestion.md`
 
 Changes in this version: Automatic rolling bill generation, removal of per-room overrides in favor of rate-change adjustments and write-offs, and the move-in/move-out partial-month asymmetry.
 
-Changes in this version: Added the append-only advance movement ledger and its reconciliation invariant for fraud auditability. The advance balance remains derived.
+Previous version (0.2.0): Added the append-only advance movement ledger and its reconciliation invariant for fraud auditability. The advance balance remains derived.
 
 ---
 
