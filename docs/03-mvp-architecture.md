@@ -5,7 +5,7 @@ Version: `0.8.3`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-17
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
-Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`; absorbs `utility-billing-arch.md` (architecture.md v0.1.0)
+Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md` (retired; not in repo); absorbs `utility-billing-arch.md` (architecture.md v0.1.0)
 
 ## Document Lineage
 
@@ -711,6 +711,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
                                       └── Sender Alias
 ```
 **Entity Summary**
+
 | Entity | Purpose & Key Relationships |
 |---|---|
 | Organization | Root isolation boundary. Owns properties, users, and financial records. |
@@ -722,6 +723,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 | Transaction | Normalized source transaction. Categorized as `tenant_payment` or `utility_bill_payment`. |
 | Monthly Bill | Billing state for a tenancy/month. One per tenancy/month. |
 | Payment Allocation | Links a tenant payment to a monthly bill. |
+| Advance Movement | Append-only advance-credit event (created/applied/reversed) linked to its originating payment and reconciled against the derived advance balance. |
 | Bill Adjustment | Recorded change to a bill's final amount (rate-change or write-off only). |
 | Utility Provider | Global registry of utility companies (e.g., BEDC). |
 | Utility Bill Payment | Outgoing payment to a provider. Does not settle tenant bills. |
@@ -1064,7 +1066,7 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 
 ## 17. Remaining Detailed Design Documents
 
-The following detailed documents should be created before or during implementation:
+The full planned document set is:
 
 ```text
 docs/
@@ -1084,16 +1086,12 @@ docs/
 └── 12-roadmap.md
 ```
 
-The most important next documents are:
+Document status:
 
-`04-database.md`
-Detailed schema, constraints, indexes, relationships, staged import storage, allocation history, utility provider records, visibility settings, and tenant access credentials.
+- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, and `docs/adr/` (ADR-001 through ADR-027).
+- Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, and `07`–`12`.
 
-`05-billing-engine.md`
-Billing state machine, allocation algorithm, adjustments, corrections, and edge cases.
-
-`06-transaction-ingestion.md`
-Payvice Avantus PDF import profile, category mapping, normalization, duplicate detection, and matching behavior.
+The most important remaining documents are:
 
 `09-security.md`
 Authentication, authorization, session handling, tenant visibility policy, and access code rules.
@@ -1131,26 +1129,26 @@ Resolved or relocated items:
 ## 19. Summary of Locked MVP Rules
 
 **Architecture & Ledgers**
-- [ ] Two strictly separated ledgers (Tenant Payment vs. Utility Bill Payment).
-- [ ] Utility providers and Import profiles are global/system-wide registries.
+- Two strictly separated ledgers (Tenant Payment vs. Utility Bill Payment).
+- Utility providers and Import profiles are global/system-wide registries.
 
 **Ingestion**
-- [ ] Payvice Avantus PDF is the primary source (text-based, staged, admin-confirmed).
-- [ ] `FUNDING` = tenant payment; `BEDC` = utility payment; `COMMISSION` = discarded.
+- Payvice Avantus PDF is the primary source (text-based, staged, admin-confirmed).
+- `FUNDING` = tenant payment; `BEDC` = utility payment; `COMMISSION` = discarded.
 
 **Billing & Allocation**
-- [ ] Lazy/rolling bill generation only (no background schedulers, no manual generation).
-- [ ] Uniform standard amount (no arbitrary per-room overrides).
-- [ ] Adjustments limited to rate-changes and write-offs (fully audited/visible).
-- [ ] Chronological, oldest-outstanding-first allocation.
-- [ ] Advance credit is derived; movements logged in an append-only ledger.
-- [ ] Move-in partial months unbilled by default; move-out billed in full by default.
+- Lazy/rolling bill generation only (no background schedulers, no manual generation).
+- Uniform standard amount (no arbitrary per-room overrides).
+- Adjustments limited to rate-changes and write-offs (fully audited/visible).
+- Chronological, oldest-outstanding-first allocation.
+- Advance credit is derived; movements logged in an append-only ledger.
+- Move-in partial months unbilled by default; move-out billed in full by default.
 
 **Visibility & Access**
-- [ ] Privacy boundary is the tenancy.
-- [ ] Shared access codes (no individual tenant logins).
-- [ ] Closed tenancies permanently lose portal access.
-- [ ] Visibility rules enforced server-side and configurable.
+- Privacy boundary is the tenancy.
+- Shared access codes (no individual tenant logins).
+- Closed tenancies permanently lose portal access.
+- Visibility rules enforced server-side and configurable.
 
 **Hosting**
-- [ ] Free-tier compatible (no cron, no background workers, no persistent local files).
+- Free-tier compatible (no cron, no background workers, no persistent local files).

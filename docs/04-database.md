@@ -375,8 +375,8 @@ UNIQUE (tenancy_id, normalized_name)
 
 Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
-- The standard amount is organization-wide and uniform across rooms. Used of the standard amount, "global" in the ADRs means org-wide; used of utility providers and import profiles, "global" means system-wide.
-- Bills snapshot the amount at generation time, so changing this value does not rewrite existing bills.
+- The standard amount is organization-wide and uniform across rooms. When describing the standard amount, "global" in the ADRs means org-wide; when describing utility providers and import profiles, "global" means system-wide.
+- Bills snapshot the standard amount at generation time. Changing this value does not silently rewrite existing bills; already-generated, unsettled current-month bills are adjusted only via recorded `bill_adjustment` rows, while settled bills and past months are never adjusted.
 
 #### billing_override
 
@@ -555,7 +555,8 @@ Why this table exists:
 | previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
-| public_note | TEXT | | Visible to tenants |
+| public_note | TEXT | | Visible to tenants; holds the auto-generated note |
+| custom_note | TEXT | | Optional public custom note added by admin |
 | internal_reason | TEXT | | Admin-only |
 | admin_id | UUID | FK → admin_user, NOT NULL | |
 | created_at | timestamptz | NOT NULL | |
@@ -688,6 +689,13 @@ Notes:
 | totals_status | totals_status | | valid / mismatch / missing |
 | statement_fingerprint | TEXT | | Hash for duplicate-statement detection |
 | ignored_summary | JSONB | | Counts/amounts for ignored categories |
+| tenant_payment_row_count | INTEGER | | Persistable tenant-payment rows staged |
+| tenant_payment_total_minor | BIGINT | | Staged tenant-payment amount total |
+| utility_payment_row_count | INTEGER | | Persistable utility-payment rows staged |
+| utility_payment_total_minor | BIGINT | | Staged utility-payment amount total |
+| duplicate_row_count | INTEGER | | Rows skipped as duplicates |
+| invalid_row_count | INTEGER | | Rows marked invalid |
+| unrecognized_row_count | INTEGER | | Rows marked unrecognized |
 | uploaded_at | timestamptz | NOT NULL | |
 | confirmed_at | timestamptz | | |
 | created_at | timestamptz | NOT NULL | |
@@ -703,6 +711,7 @@ Notes:
 - `ignored_summary` may include TRANSFER/CHARGE/VAT counts and totals.
 - `ignored_summary` must never include commission data.
 - `totals_credit_minor`, `totals_debit_minor`, and any monetary amounts inside `ignored_summary` are expressed in the batch `currency`.
+- The staged-row counters and their `*_total_minor` amount totals are populated at parse time and are expressed in the batch `currency`.
 - The partial unique index prevents committing the same statement twice while still allowing re-import after rejection.
 
 ---
@@ -803,18 +812,21 @@ The following values are computed, not stored. They are produced by the billing 
 ### 7.1 Monthly bill status
 
 ```text
-allocated = SUM(payment_allocation.amount_minor) for the bill
-            (excluding reversed allocations)
+net_allocated = SUM(signed payment_allocation.amount_minor) for the bill
 
-if allocated = 0                    → unpaid
-if 0 < allocated < final_amount     → partial
-if allocated >= final_amount        → paid
+A signed allocation is:
+  + amount_minor  for allocation_type in (automatic, manual, correction)
+  - amount_minor  for allocation_type = reversal
+
+if net_allocated = 0                → unpaid
+if 0 < net_allocated < final_amount → partial
+if net_allocated >= final_amount    → paid
 ```
 
 ### 7.2 Bill remaining due
 
 ```text
-remaining = final_amount_minor - allocated
+remaining = final_amount_minor - net_allocated
 ```
 
 ### 7.3 Tenancy outstanding balance
@@ -828,7 +840,7 @@ outstanding = SUM(remaining) across the tenancy's bills where remaining > 0
 The advance **balance** is derived. It is not stored as a mutable number.
 
 ```text
-advance_balance = SUM(transaction.amount_minor - allocated_amount)
+advance_balance = SUM(transaction.amount_minor - net_allocated)
                   across matched tenant_payment transactions
                   where unallocated remainder > 0
 ```
@@ -846,7 +858,9 @@ For every `tenant_payment` transaction, two independent values must agree:
 ```text
 derived_unallocated =
     transaction.amount_minor
-    - SUM(non-reversed payment_allocation.amount_minor for that transaction)
+    - SUM(signed payment_allocation.amount_minor for that transaction)
+
+(signed as defined in Section 7.1: plus for automatic/manual/correction, minus for reversal)
 
 logged_advance =
     SUM(advance_movement.amount_minor where movement_type = 'created')
@@ -895,7 +909,7 @@ For MVP, these can be plain queries. A materialized read model is a future optim
 
 Some invariants span rows and are enforced in the service layer inside database transactions, not by single-column constraints.
 
-1. **Allocation cap.** The sum of non-reversed allocations for a transaction must not exceed the transaction amount.
+1. **Allocation cap.** The sum of signed allocations for a transaction (as defined in Section 7.1) must not exceed the transaction amount.
 2. **Advance reconciliation.** The derived advance balance must equal the logged advance per Section 7.5. Violations are flagged.
 3. **Ledger separation.** Utility bill payments must never create payment allocations. Tenant payments must never create utility bill payments.
 4. **Commissions never stored.** No row with channel `COMMISSION` may reach `transaction` or `staged_import_row`.
@@ -1032,6 +1046,7 @@ This classification covers every table specified in Section 6.
   - One global import profile: `PAYVICE_AVANTUS` (organization_id null).
   - Channel/category mappings for the Payvice Avantus profile.
   - One global utility provider: `BEDC` (organization_id null).
+  - One default `billing_config` row for the organization with the deployment's standard monthly amount (admin-configurable and required before the first lazy bill generation).
   - Default portal settings.
 
 ---

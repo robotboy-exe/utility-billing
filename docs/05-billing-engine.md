@@ -170,7 +170,7 @@ The final amount due is the amount the tenancy is expected to pay for that billi
 
 It is normally the standard monthly amount.
 
-It may differ from the standard amount only when the admin explicitly adjusts the bill.
+It may differ from the standard amount only through a recorded adjustment (a rate change or a write-off); see Section 5.3.
 
 ---
 
@@ -533,7 +533,7 @@ Outstanding balance: ₦0
 Advance credit: ₦5,000
 ```
 
-Later, admin generates a bill:
+Later, a bill is generated (lazily):
 
 | Bill Month | Amount Due |
 |---|---:|
@@ -572,7 +572,7 @@ This makes advance credit auditable and tamper-evident without introducing a sec
 
 ## 8. Bill Status Rules
 
-Bill status is derived.
+Bill status is derived. "Allocated amount" below is the signed net defined in `04-database.md` Section 7.1: allocation amounts are added for `automatic`/`manual`/`correction` and subtracted for `reversal`.
 
 ### 8.1 Unpaid
 

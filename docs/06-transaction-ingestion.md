@@ -980,19 +980,18 @@ The batch stores:
 
 ### 21.2 Batch counters
 
-The batch may store:
+The batch stores counters for review and reconciliation:
 
-- Tenant payment rows staged.
-- Tenant payment amount total.
-- Utility payment rows staged.
-- Utility payment amount total.
-- Ignored row count.
-- Ignored amount total.
-- Duplicate rows skipped.
-- Invalid rows detected.
-- Unrecognized rows detected.
+- Tenant payment rows staged (`tenant_payment_row_count`).
+- Tenant payment amount total (`tenant_payment_total_minor`).
+- Utility payment rows staged (`utility_payment_row_count`).
+- Utility payment amount total (`utility_payment_total_minor`).
+- Ignored row count and amount totals (in `ignored_summary`).
+- Duplicate rows skipped (`duplicate_row_count`).
+- Invalid rows detected (`invalid_row_count`).
+- Unrecognized rows detected (`unrecognized_row_count`).
 
-The batch must not store commission counts or amounts.
+The `*_total_minor` counters are expressed in the batch `currency`. The batch must not store commission counts or amounts.
 
 ---
 
