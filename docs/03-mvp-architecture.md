@@ -1,11 +1,10 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.6.0`
+Version: `0.7.0`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-16
-Extends: `architecture.md` version `0.1.0`
-Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`
+Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`, and absorbs utility-billing-arch.md (architecture.md v0.1.0)
 
 ## Document Lineage
 
@@ -20,6 +19,8 @@ Those amendment files are now retired. Any future change should be made here dir
 Version 0.5.0 adds the advance movement ledger with its reconciliation invariant for fraud auditability, and clarifies that utility providers and import profiles are registered globally (system-wide).
 
 Version 0.6.0 resolves the billing and tenancy product decisions: automatic rolling bill generation, removal of per-room bill overrides in favor of rate-change-driven adjustments and debt write-offs, the move-in/move-out partial-month asymmetry, closed-tenancy portal access, and the property dashboard metrics.
+
+Version 0.7.0 absorbs the base architecture document (`utility-billing-arch.md`), folding in the architectural goals, guiding principles, core modules, transaction flow and source abstraction, deployment models, scalability strategy, and ADR-001 through ADR-007. The base document is retired; this file is now the single architecture source of truth.
 
 ---
 
@@ -39,7 +40,7 @@ The application allows a landlord or property manager to:
 - Preserve historical financial records.
 - Provide secure read-only access for tenants to view billing information.
 
-This document refines the original high-level architecture for the MVP by adding:
+This document adds the MVP's free-hosting constraints and product decisions:
 
 - Free-hosting constraints.
 - A two-ledger financial model.
@@ -50,24 +51,94 @@ This document refines the original high-level architecture for the MVP by adding
 - Payvice Avantus PDF ingestion as the primary transaction source.
 - MVP-specific scope limitations.
 
-The original `architecture.md` remains the high-level architectural source of truth. This document defines how the MVP is shaped under practical hosting and product constraints.
+This document is the consolidated source of truth for the system architecture. It combines the foundational architectural goals, principles, and module structure with the MVP's free-hosting constraints and product decisions.
 
 ---
 
-## 2. Relationship to the Original Architecture
+## 2. Architectural Foundations
 
-This MVP architecture retains the core principles of the original architecture document:
+### 2.1 Architectural Goals
 
-- Financial correctness.
-- Modularity.
-- Source-agnostic transaction handling.
-- Immutable financial history.
-- Single source of truth.
-- Deployment independence.
-- Organization-level data isolation.
-- Separation of concerns.
-- Billing engine independence.
-- Auditability.
+The system should be:
+
+**Correct**
+
+Financial calculations and payment allocations must be deterministic, auditable, and reproducible.
+
+**Modular**
+
+Business domains should be separated so that changes to one subsystem do not unnecessarily affect others.
+
+**Source-Agnostic**
+
+The billing system must not depend on whether a transaction originated from a PDF statement, CSV file, Excel statement, Paystack webhook, Monnify webhook, bank API, or another source.
+
+**Deployment-Agnostic**
+
+The application should support:
+
+- Centralized multi-tenant SaaS.
+- Dedicated deployments.
+- Single-tenant/self-hosted deployments.
+
+The business logic must remain identical across these deployment models.
+
+**Extensible**
+
+The architecture should allow future features such as:
+
+- Multiple properties.
+- Multiple utility categories.
+- Additional payment providers.
+- Direct bank integrations.
+- Notifications.
+- Mobile applications.
+- Additional reporting and export formats.
+
+**Maintainable**
+
+The system should be structured so that both human developers and AI coding assistants can understand and modify individual modules without needing to reason about the entire application simultaneously.
+
+### 2.2 Guiding Principles
+
+#### 2.2.1 Business Logic First
+
+Financial and tenancy rules take precedence over UI considerations.
+
+#### 2.2.2 Separation of Concerns
+
+The following concerns should remain separate:
+
+- Presentation.
+- API.
+- Business logic.
+- Data access.
+- External integrations.
+- Persistence.
+
+#### 2.2.3 Domain Isolation
+
+Major business domains should have clear boundaries.
+
+For example, the billing engine should not contain bank statement parsing logic.
+
+#### 2.2.4 Immutable Financial History
+
+Transactions and historical payment allocations must be preserved.
+
+Corrections should be represented through controlled correction/reversal mechanisms rather than silently rewriting historical financial data.
+
+#### 2.2.5 Single Source of Truth
+
+Each important piece of information should have one authoritative representation.
+
+For example, a transaction should be stored once and referenced by payment allocations rather than duplicated into every monthly bill.
+
+#### 2.2.6 Deployment Independence
+
+No core business rule should behave differently depending on whether the application is running as SaaS, a dedicated installation, or a standalone installation.
+
+### 2.3 MVP Scope Simplifications
 
 However, the MVP intentionally simplifies the scope:
 
@@ -195,6 +266,29 @@ The following are deferred:
 - Individual tenant credentials, unless added later by a future ADR.
 - Automated bank reconciliation.
 
+### 4.3 Future Architectural Considerations
+
+The architecture should leave room for:
+
+- Multiple utility categories.
+- Property-specific utility pricing.
+- Multiple properties.
+- Multiple buildings.
+- More payment providers.
+- Direct bank integrations.
+- Automated bank reconciliation.
+- Notifications.
+- Mobile clients.
+- Advanced reporting.
+- Subscription billing.
+- Role-based access control.
+- Dedicated customer environments.
+- Offline/self-hosted deployments.
+
+These features should not be implemented merely because the architecture allows them.
+
+The current implementation should remain focused on the MVP.
+
 ---
 
 ## 5. Free-Hosting Constraints
@@ -253,9 +347,9 @@ Export formats may include CSV or JSON.
 
 ---
 
-## 6. High-Level System Architecture
+## 6. System Architecture
 
-The MVP follows the same high-level architecture as the original document.
+The MVP follows the high-level architecture below.
 
 ```text
 Browser
@@ -344,11 +438,263 @@ The exact provider should be chosen before implementation, but the MVP should fi
 
 The business logic must remain independent of the selected hosting provider.
 
+### 6.5 System Context
+
+At a high level:
+
+```text
+                   ┌─────────────────────┐
+                   │      Landlord       │
+                   │       / User        │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+                   ┌─────────────────────┐
+                   │   Web Application   │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+                   ┌─────────────────────┐
+                   │      Backend        │
+                   │   Business Logic    │
+                   └──────────┬──────────┘
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+         ┌───────────┐ ┌─────────────┐ ┌───────────┐
+         │ Database  │ │ Transaction │ │ External  │
+         │           │ │  Sources    │ │ Services  │
+         └───────────┘ └─────────────┘ └───────────┘
+```
+
+External transaction sources may include:
+
+- CSV statements.
+- XLSX statements.
+- PDF statements.
+- Google Sheets.
+- Paystack.
+- Monnify.
+- Direct bank APIs.
+- Manual entry.
+
+### 6.6 ORM and Database Tooling
+
+Initial recommendation:
+
+- SQLAlchemy.
+- Alembic.
+
+SQLAlchemy will provide the application data-access/model layer.
+
+Alembic will manage database schema migrations.
+
+### 6.7 Core Modules
+
+The application should be divided into domain-oriented modules.
+
+#### 6.7.1 Organization Module
+
+Responsible for:
+
+- Organizations.
+- Organization configuration.
+- Organization-level isolation.
+
+#### 6.7.2 Property Module
+
+Responsible for:
+
+- Properties.
+- Rooms.
+- Property configuration.
+
+#### 6.7.3 Tenancy Module
+
+Responsible for:
+
+- Tenancies.
+- Tenants.
+- Tenant changes.
+- Sender aliases.
+- Tenancy lifecycle.
+
+#### 6.7.4 Transaction Ingestion Module
+
+Responsible for obtaining transactions from external sources.
+
+MVP:
+
+- PDF (Payvice Avantus) — primary.
+- CSV — secondary.
+- XLSX — secondary, if practical.
+- Manual entry — always available as a fallback for parse failures.
+
+Planned:
+
+- Google Sheets.
+- Paystack webhooks.
+- Monnify webhooks.
+- Direct bank APIs.
+
+All sources must be normalized into the application's standard transaction model.
+
+Detailed ingestion architecture belongs in `06-transaction-ingestion.md`.
+
+#### 6.7.5 Transaction Matching Module
+
+Responsible for:
+
+- Matching sender names to sender aliases.
+- Identifying the associated tenancy.
+- Handling unmatched transactions.
+- Supporting manual matching.
+
+Matching must not directly implement billing allocation rules.
+
+#### 6.7.6 Billing Module
+
+Responsible for:
+
+- Monthly bills.
+- Payment allocation.
+- Outstanding debt.
+- Current-month payments.
+- Advance payments.
+- Partial payments.
+- Billing status.
+
+This is the core financial business domain.
+
+Detailed rules belong in `05-billing-engine.md`.
+
+#### 6.7.7 Reporting Module
+
+Responsible for presenting information such as:
+
+- Rooms fully paid.
+- Rooms owing.
+- Amount owed.
+- Current-month payment status.
+- Advance payments.
+- Payment history.
+- Transaction history.
+
+Reports should derive their data from authoritative records rather than maintain independent copies of financial state.
+
+#### 6.7.8 Administration Module
+
+Responsible for:
+
+- Global utility bill amount.
+- Application configuration.
+- Import profiles.
+- Administrative operations.
+
+#### 6.7.9 Authentication and Authorization
+
+Responsible for:
+
+- User authentication.
+- Sessions/tokens.
+- Organization membership.
+- Roles and permissions.
+
+The architecture should support multiple users per organization even if the first release has only one administrator.
+
+#### 6.7.10 Audit Module
+
+Responsible for recording important actions affecting the system.
+
+Audit records should be append-oriented and should not be casually editable.
+
+### 6.8 Transaction Flow
+
+The generalized transaction flow is:
+
+```text
+External Source
+      │
+      ▼
+Transaction Ingestion
+      │
+      ▼
+Normalization
+      │
+      ▼
+Duplicate Detection
+      │
+      ▼
+Transaction Stored
+      │
+      ▼
+Transaction Matching
+      │
+      ▼
+Matched Tenancy
+      │
+      ▼
+Billing Engine
+      │
+      ▼
+Payment Allocations
+      │
+      ▼
+Monthly Billing State
+      │
+      ▼
+Reports / Dashboard
+```
+
+The same flow should apply regardless of whether the source is a statement import or a future integration.
+
+### 6.9 Transaction Source Abstraction
+
+The system must separate transaction acquisition from transaction processing.
+
+Conceptually:
+
+```text
+CSV ───────────┐
+XLSX ──────────┤
+PDF ────────────┤
+Google Sheets ──┤
+Paystack ───────┤
+Monnify ────────┤
+Bank API ───────┤
+Manual ─────────┘
+                │
+                ▼
+       Standard Transaction
+                │
+                ▼
+        Matching + Billing
+```
+
+Adding a new transaction source should not require modifications to the billing engine.
+
+### 6.10 Billing Independence
+
+The Billing Engine must not depend on:
+
+- React.
+- FastAPI request handlers.
+- CSV parsing.
+- XLSX parsing.
+- PDF extraction.
+- Paystack.
+- Monnify.
+- Bank APIs.
+
+The Billing Engine should operate on domain-level data.
+
+This allows it to be tested independently from the user interface and external integrations.
+
 ---
 
 ## 7. Domain Model
 
-The MVP retains the domain hierarchy from the original architecture.
+The MVP retains the domain hierarchy described in this document.
 
 ```text
 Organization
@@ -1290,7 +1636,7 @@ Does not reconcile tenant balances.
 
 ## 24. Security Principles
 
-The MVP must follow the security principles from the original architecture.
+The MVP must follow the security principles below.
 
 ### 24.1 Transport security
 
@@ -1555,6 +1901,143 @@ The application should remain portable to:
 - A managed platform.
 - A dedicated deployment.
 
+### 30.4 Deployment Models
+
+The application should support three deployment models.
+
+#### 30.4.1 Centralized SaaS
+
+Multiple organizations use the same application infrastructure.
+
+```text
+                     Application
+                          │
+                   ┌──────┴──────┐
+                   │              │
+               Organization A  Organization B
+                   │              │
+                   └──────┬───────┘
+                          │
+                      Database
+```
+
+Data must be strictly isolated by organization.
+
+This is the primary scalable commercial model.
+
+#### 30.4.2 Dedicated Deployment
+
+A customer receives an isolated deployment.
+
+```text
+Customer A
+Application + Database
+
+Customer B
+Application + Database
+```
+
+The same application codebase can be deployed independently for each customer.
+
+#### 30.4.3 Standalone / Self-Hosted
+
+The application may eventually be packaged for customers who want to run it themselves.
+
+The application architecture should not require this mode, but it should remain technically possible.
+
+### 30.5 Deployment Independence
+
+The application must not contain business logic that assumes:
+
+- One organization.
+- One property.
+- One deployment.
+- SaaS-only operation.
+- Self-hosted-only operation.
+
+Deployment configuration should determine how the application is hosted, while domain logic remains unchanged.
+
+### 30.6 Multi-Tenant Architecture
+
+For SaaS deployments, organization-level isolation is mandatory.
+
+Conceptually:
+
+```text
+Organization A
+├── Properties
+├── Rooms
+├── Tenancies
+├── Transactions
+└── Billing Records
+
+Organization B
+├── Properties
+├── Rooms
+├── Tenancies
+├── Transactions
+└── Billing Records
+```
+
+Application queries must always operate within the authenticated user's organization context.
+
+The exact database-level isolation strategy will be defined in `04-database.md`.
+
+### 30.7 Scalability Strategy
+
+The initial workload is expected to be relatively light.
+
+The application primarily processes:
+
+- Financial transaction records.
+- Monthly billing records.
+- Tenant information.
+- Reports.
+
+It does not require significant computational resources under normal usage.
+
+The architecture should therefore prioritize simplicity and correctness rather than premature distributed infrastructure.
+
+Initial scaling strategy:
+
+```text
+Reverse Proxy
+      │
+Application Server
+      │
+PostgreSQL
+```
+
+Scale horizontally only when actual usage requires it.
+
+Potential future additions include:
+
+- Multiple application instances.
+- Managed PostgreSQL.
+- Background job workers.
+- Queue infrastructure.
+- Object storage.
+- Dedicated webhook processing.
+
+### 30.8 Serverless Integrations (future / deferred)
+
+Paystack and Monnify webhook endpoints may eventually be deployed as serverless functions. These integrations are outside the MVP scope.
+
+These functions should:
+
+1. Receive the webhook.
+2. Verify its authenticity.
+3. Validate the event.
+4. Ensure idempotency.
+5. Normalize the transaction.
+6. Store or forward the transaction.
+7. Trigger downstream processing.
+8. Return an appropriate acknowledgement.
+
+Webhook processing must be safe to retry.
+
+The core billing logic should remain independent of whether webhook handling occurs in the main backend or a serverless function.
+
 ---
 
 ## 31. Testing Focus
@@ -1592,7 +2075,75 @@ Financial allocation scenarios should have strong automated test coverage.
 
 ## 32. Architectural Decision Records
 
-ADR-001 through ADR-007 are defined in the original `architecture.md` and remain relevant.
+ADR-001 through ADR-007 are listed below and remain relevant.
+
+### ADR-001 — Organization as Root Entity
+
+Status: Accepted.
+
+Organizations provide the top-level boundary for customer data.
+
+```text
+Organization
+    → Property
+        → Room
+            → Tenancy
+                → Tenant
+```
+
+---
+
+### ADR-002 — Multi-Tenant Architecture
+
+Status: Accepted.
+
+The application will be designed to support multi-tenant SaaS deployments.
+
+The same architecture must also support dedicated and standalone deployments.
+
+---
+
+### ADR-003 — Deployment-Model Independence
+
+Status: Accepted.
+
+Business logic must not depend on whether the application is deployed as SaaS, dedicated, or standalone.
+
+---
+
+### ADR-004 — Transaction Source Abstraction
+
+Status: Accepted.
+
+All transaction sources must normalize into a common transaction representation before entering the core business logic.
+
+---
+
+### ADR-005 — Statement Imports as MVP
+
+Status: Superseded by ADR-014.
+
+CSV and XLSX statement imports are the initial transaction ingestion mechanism.
+
+---
+
+### ADR-006 — Future Event-Driven Integrations
+
+Status: Accepted.
+
+Paystack and Monnify webhooks are planned future transaction sources.
+
+Serverless functions may be used for webhook ingestion where appropriate.
+
+---
+
+### ADR-007 — Billing Engine Independence
+
+Status: Accepted.
+
+The billing engine must remain independent of transaction source, frontend, and API implementation details.
+
+---
 
 Note: ADR-005 (Statement Imports as MVP) is amended by ADR-014 below. PDF is now the primary MVP ingestion source; CSV and XLSX remain secondary.
 
@@ -1989,7 +2540,6 @@ docs/
 ├── 00-project-overview.md
 ├── 01-ai-development-guide.md
 ├── 02-requirements.md
-├── 03-architecture.md
 ├── 03-mvp-architecture.md
 ├── 04-database.md
 ├── 05-billing-engine.md
