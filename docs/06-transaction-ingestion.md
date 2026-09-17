@@ -1,12 +1,12 @@
 # Transaction Ingestion
 
 Document: `docs/06-transaction-ingestion.md`  
-Version: `0.2.0`  
+Version: `0.2.1`  
 Status: Draft — accepted MVP ingestion design  
-Last Updated: 2026-09-16  
-Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`
+Last Updated: 2026-09-17  
+Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`
 
-Changes in this version: Clarified that import profiles and utility providers are registered globally (system-wide), not per organization.
+Changes in this version: Added `04-database.md` to the related documents and refreshed the metadata. No ingestion rules changed.
 
 ---
 

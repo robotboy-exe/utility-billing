@@ -13,5 +13,5 @@ Bills are generated lazily/on-demand the first time the system needs them (dashb
 ## Consequences
 
 - No manual monthly action is needed.
-- The "manual generation" point in ADR-012 is revised.
+- Manual monthly generation is removed; generation is lazy only.
 - Reports trigger generation to stay accurate.

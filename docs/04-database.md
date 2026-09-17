@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.3.0`
+Version: `0.3.1`
 Status: Draft — design phase, no implementation yet
-Last Updated: 2026-09-16
+Last Updated: 2026-09-17
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Added billing override, standard-amount-change history, and typed bill adjustments (rate change / write-off) to support the resolved billing decisions.
+Changes in this version: Reconciled the entity-relationship overview with the full table list (added `billing_override` and `standard_amount_change`), clarified that `billing_override` is a bill/skip decision only and never changes an amount, and classified every table under Immutability and Retention.
 
 ---
 
@@ -178,6 +178,8 @@ AdminUser ─── Organization
                   │        └──< ImportBatch ──< StagedImportRow
                   │
                   ├── BillingConfig
+                  ├── BillingOverride
+                  ├── StandardAmountChange
                   ├── PortalSetting
                   └── AuditLog
 ```
@@ -386,7 +388,7 @@ Notes:
 
 Unique constraint: `UNIQUE (tenancy_id, billing_month)`.
 
-Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemption (`skip`). The lazy generator consults this table before creating a bill.
+Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemption (`skip`). The lazy generator consults this table before creating a bill. This is a bill/skip decision only; it never changes a bill amount. Amount changes are limited to recorded rate-change adjustments and write-offs (see `bill_adjustment`).
 
 #### standard_amount_change
 
@@ -960,6 +962,7 @@ These are append-oriented and must not be silently edited or deleted:
 - payment_allocation
 - advance_movement
 - bill_adjustment
+- standard_amount_change
 - utility_bill_payment
 - audit_log
 
@@ -972,22 +975,25 @@ These may be updated normally:
 - organization, property, room
 - tenancy, tenant, sender_alias
 - monthly_bill (amount changes only via adjustment)
-- billing_config, portal_setting
-- import_profile, import_channel_category_mapping
+- billing_config, billing_override, portal_setting
+- import_profile, import_channel_category_mapping, import_batch
+- utility_provider
 - tenant_access_credential (rotation)
 - admin_user
 
 ### 11.3 Staged row retention
 
-After an import batch is committed, `staged_import_row` entries may be pruned after a retention window, because the committed `transaction` rows are the source of truth. Pruning policy is an open question.
+After an import batch is committed, `staged_import_row` entries may be pruned after a retention window, because the committed `transaction` rows are the source of truth. Pruning policy is an open question. `staged_import_row` is staging-only operational data and is not part of immutable financial history.
 
 ### 11.4 Session retention
 
-Expired or revoked `tenant_session` rows may be pruned periodically.
+Expired or revoked `tenant_session` rows may be pruned periodically. `tenant_session` is operational/ephemeral data, not financial history.
 
 ### 11.5 Commission data
 
 Commission data is never stored anywhere and therefore has no retention concern. It must also be excluded from logs and error output.
+
+This classification covers every table specified in Section 6.
 
 ---
 

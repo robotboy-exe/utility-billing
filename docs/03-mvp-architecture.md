@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.8.0`
+Version: `0.8.1`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
-Last Updated: 2026-09-16
+Last Updated: 2026-09-17
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`, and absorbs utility-billing-arch.md (architecture.md v0.1.0)
 
@@ -24,6 +24,8 @@ Version 0.6.0 resolves the billing and tenancy product decisions: automatic roll
 Version 0.7.0 absorbs the base architecture document (`utility-billing-arch.md`), folding in the architectural goals, guiding principles, core modules, transaction flow and source abstraction, deployment models, scalability strategy, and ADR-001 through ADR-007. The base document is retired; this file is now the single architecture source of truth.
 
 > Version 0.8.0 refactors the document for leanness: extracts ADRs to `docs/adr/`, collapses domain model and visibility sprawl, replaces detailed billing/ingestion rules with pointers to `05` and `06`, and transforms the locked rules summary into a compact checklist.
+
+Version 0.8.1 reconciles the locked rules with the ADR library: bills are generated lazily only (no manual or scheduled generation), the standard amount has no per-tenancy override, and the visibility matrix is labelled as the configurable default policy.
 
 ---
 
@@ -725,6 +727,8 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 
 *Detailed schema, constraints, indexes, and exact field definitions are specified in `04-database.md`.*
 
+This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
+
 ---
 
 ## 8. Authentication & Authorization
@@ -751,6 +755,8 @@ Visibility is a policy concern enforced server-side. The frontend must not be tr
 The privacy boundary is the **tenancy**. Members of the same tenancy see full details. Members of other tenancies see limited property-level billing info. Tenants cannot see other properties. Admin sees everything.
 
 **9.2 Visibility Matrix**
+The values below are the MVP **default policy**. Each cell is configurable at organization or property scope through `portal_setting` (see `04-database.md` §6.8 and ADR-011), and enforcement is always server-side.
+
 | Information | Same tenancy | Other rooms (same property) | Other properties | Admin |
 |---|---|---|---|---|
 | Property/Room list & names | Visible | Visible | Hidden | Visible |
@@ -1129,7 +1135,7 @@ Resolved or relocated items:
 - [ ] `FUNDING` = tenant payment; `BEDC` = utility payment; `COMMISSION` = discarded.
 
 **Billing & Allocation**
-- [ ] Lazy/rolling bill generation (no background schedulers).
+- [ ] Lazy/rolling bill generation only (no background schedulers, no manual generation).
 - [ ] Uniform standard amount (no arbitrary per-room overrides).
 - [ ] Adjustments limited to rate-changes and write-offs (fully audited/visible).
 - [ ] Chronological, oldest-outstanding-first allocation.

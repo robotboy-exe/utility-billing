@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.3.0`
-Status: Draft — accepted MVP billing rules  
-Last Updated: 2026-09-16  
-Related documents: `03-mvp-architecture.md`, `06-transaction-ingestion.md`
+Version: `0.3.1`
+Status: Draft — accepted MVP billing rules
+Last Updated: 2026-09-17  
+Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Automatic rolling bill generation, removal of per-room overrides in favor of rate-change adjustments and write-offs, and the move-in/move-out partial-month asymmetry.
+Changes in this version: Reconciled the generation and override wording with the ADR library. Bill generation is lazy only (manual backfill removed), and the standard amount has no per-tenancy override; the only override is the force-bill/force-skip decision, which never changes an amount.
 
 Previous version (0.2.0): Added the append-only advance movement ledger and its reconciliation invariant for fraud auditability. The advance balance remains derived.
 
@@ -270,13 +270,13 @@ For that month:
 - Vacant rooms do not receive bills.
 - Generation is idempotent.
 - Generation is synchronous and triggered by real usage, not a background scheduler.
-- Manual generation remains available as an optional backfill action.
+- Generation is automatic and rolling. There is no manual generation or scheduled job.
 
 ---
 
 ### 5.2 Standard amount
 
-The standard monthly amount applies to all active tenancies unless explicitly overridden.
+The standard monthly amount applies uniformly to all active tenancies. There is no per-tenancy or per-room amount override; the only per-tenancy/month override is the force-bill or force-skip decision, which never changes the amount.
 
 Rules:
 
@@ -626,7 +626,7 @@ For each tenancy, the engine derives:
 
 ## 10. Interaction with Bill Generation
 
-When bills are generated (lazily or manually):
+When bills are generated (lazily):
 - Create missing monthly bills for active tenancies.
 - Do not duplicate existing bills.
 - Apply any billing overrides (force-bill or force-skip).
