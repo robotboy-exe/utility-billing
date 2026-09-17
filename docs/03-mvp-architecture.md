@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.8.1`
+Version: `0.8.2`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-17
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
@@ -23,9 +23,11 @@ Version 0.6.0 resolves the billing and tenancy product decisions: automatic roll
 
 Version 0.7.0 absorbs the base architecture document (`utility-billing-arch.md`), folding in the architectural goals, guiding principles, core modules, transaction flow and source abstraction, deployment models, scalability strategy, and ADR-001 through ADR-007. The base document is retired; this file is now the single architecture source of truth.
 
-> Version 0.8.0 refactors the document for leanness: extracts ADRs to `docs/adr/`, collapses domain model and visibility sprawl, replaces detailed billing/ingestion rules with pointers to `05` and `06`, and transforms the locked rules summary into a compact checklist.
+Version 0.8.0 refactors the document for leanness: extracts ADRs to `docs/adr/`, collapses domain model and visibility sprawl, replaces detailed billing/ingestion rules with pointers to `05` and `06`, and transforms the locked rules summary into a compact checklist.
 
 Version 0.8.1 reconciles the locked rules with the ADR library: bills are generated lazily only (no manual or scheduled generation), the standard amount has no per-tenancy override, and the visibility matrix is labelled as the configurable default policy.
+
+Version 0.8.2 clarifies that the standard amount is organization-wide (not system-wide), adds the move-out foreknowledge exemption to the partial-month summary, and removes a stray blockquote marker.
 
 ---
 
@@ -591,7 +593,7 @@ Reports should derive their data from authoritative records rather than maintain
 
 Responsible for:
 
-- Global utility bill amount.
+- Organization-wide standard utility bill amount (uniform across rooms; not system-wide).
 - Application configuration.
 - Import profiles.
 - Administrative operations.
@@ -789,8 +791,8 @@ The system maintains two strictly separated ledgers: the **Tenant Payment Ledger
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Automatic and rolling (lazy generation triggered by dashboard/report usage).
 - **Standard Amount:** Uniform across all rooms. No arbitrary per-room overrides.
-- **Adjustments:** Only occur via global rate-changes (adjusting unsettled current-month bills by the delta) or debt write-offs. Fully audited and visible to tenants.
-- **Partial Months:** Move-in partial months are unbilled by default (admin can opt-in). Move-out partial months are billed in full by default (admin can write-off post-closure).
+- **Adjustments:** Only occur via org-wide rate changes (adjusting unsettled current-month bills by the delta) or debt write-offs. Fully audited and visible to tenants.
+- **Partial Months:** Move-in partial months are unbilled by default (admin can opt-in). Move-out partial months are billed in full by default (admin can exempt with foreknowledge or write off post-closure).
 - **Allocation:** Chronological, oldest-outstanding-first. Overpayments become advance credit.
 - **Advance Ledger:** Advance balance is derived. Movements are recorded in an append-only ledger and reconciled for fraud detection.
 - *Detailed allocation algorithms, edge cases, and correction workflows belong in `05-billing-engine.md`.*
@@ -1051,7 +1053,7 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 | 020 | Chronological Oldest-Outstanding-First Allocation | Accepted | Chronological filling of bills. |
 | 021 | Advance Movement Ledger and Reconciliation | Accepted | Append-only log for advance credit auditability. |
 | 022 | Automatic Rolling Bill Generation (Lazy) | Accepted | Generated on-demand, not via scheduler. |
-| 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments | Accepted | Only global standard amount is adjustable. |
+| 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments | Accepted | Only the org-wide standard amount is adjustable. |
 | 024 | Partial-Month Billing Asymmetry | Accepted | Move-in skipped by default; move-out billed. |
 | 025 | Debt Write-Offs, No Hard Deletes | Accepted | Audited zeroing of debt; no hard deletes. |
 | 026 | Closed Tenancies Lose Portal Access | Accepted | Portal credentials permanently deactivated. |

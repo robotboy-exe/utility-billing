@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.3.1`
+Version: `0.3.2`
 Status: Draft — accepted MVP billing rules
 Last Updated: 2026-09-17  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Reconciled the generation and override wording with the ADR library. Bill generation is lazy only (manual backfill removed), and the standard amount has no per-tenancy override; the only override is the force-bill/force-skip decision, which never changes an amount.
+Changes in this version: Scoped the advance movement ledger's `reversed` type to undoing a `created` movement only. Restoring advance after an allocation is reversed is recorded as a new `created` movement, never as `reversed`, keeping the created-minus-applied-minus-reversed reconciliation invariant sound.
 
 Previous version (0.2.0): Added the append-only advance movement ledger and its reconciliation invariant for fraud auditability. The advance balance remains derived.
 
@@ -562,9 +562,9 @@ Every advance event is written to an append-only advance movement ledger in the 
 
 - `created` — advance credit created from a payment's unallocated remainder.
 - `applied` — advance credit applied to a monthly bill.
-- `reversed` — a prior advance movement undone by a correction.
+- `reversed` — a `created` movement undone by a correction (advance credit clawed back). It never undoes an `applied` movement; restoring an applied allocation records a new `created` movement.
 
-Reconciliation invariant: For each tenant payment, the derived unallocated remainder must equal the sum of `created` movements minus `applied` and `reversed` movements. If these disagree, the system flags an integrity error.
+Reconciliation invariant: For each tenant payment, the derived unallocated remainder must equal the sum of `created` movements minus `applied` and `reversed` movements. If these disagree, the system flags an integrity error. This identity holds because `reversed` only ever offsets a `created` movement; undoing an `applied` movement is recorded as a new `created` movement, never as `reversed`.
 
 This makes advance credit auditable and tamper-evident without introducing a second mutable source of truth.
 
@@ -673,7 +673,7 @@ Correction principles:
 - Preserve original history.
 - Recalculate derived balances.
 - Record the correction in the audit log.
-- Record advance reversals in the advance movement ledger as type `reversed`.
+- Record advance reversals in the advance movement ledger: use type `reversed` only to undo a `created` movement, and record the restoration of an applied allocation as a new `created` movement (never as `reversed`).
 
 Detailed correction workflow belongs in the database and billing implementation documents.
 

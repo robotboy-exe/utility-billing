@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.3.1`
+Version: `0.3.2`
 Status: Draft — design phase, no implementation yet
 Last Updated: 2026-09-17
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Reconciled the entity-relationship overview with the full table list (added `billing_override` and `standard_amount_change`), clarified that `billing_override` is a bill/skip decision only and never changes an amount, and classified every table under Immutability and Retention.
+Changes in this version: Added a `currency CHAR(3) NOT NULL` column to every persisted money-bearing table (`monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`) and restated §3.5, naming NGN as the MVP currency. Closed the §3.2 timestamp gaps by adding `created_at` to `billing_config`, `portal_setting`, and `tenant_session`, and `updated_at` to every mutable table, then reconciled §11.2. Scoped advance-movement `reversed` semantics to undoing a `created` movement only, and changed "global standard amount" wording to "org-wide".
 
 ---
 
@@ -59,6 +59,8 @@ id  UUID  PRIMARY KEY  DEFAULT gen_random_uuid()
 - `updated_at` — `timestamptz`, present on mutable tables only.
 - Immutable financial tables have `created_at` only.
 
+Semantic timestamps (rotated_at, issued_at, occurred_at, effective_at, uploaded_at) supplement but never replace created_at/updated_at.
+
 ### 3.3 Naming
 
 - Table names: `snake_case`, singular (e.g. `tenancy`, `monthly_bill`).
@@ -75,7 +77,7 @@ Example: ₦1,000.00 → `100000`.
 
 ### 3.5 Currency
 
-Single currency for MVP. A `currency` column is included on financial tables, defaulting to the MVP currency, to avoid a future migration.
+Every persisted table that stores a monetary amount carries a `currency CHAR(3) NOT NULL` column defaulting to the MVP currency, to avoid a future migration. Transient staging tables do not carry currency. The MVP currency is NGN (ISO 4217); monetary examples use ₦.
 
 ---
 
@@ -129,7 +131,7 @@ created | applied | reversed
 
 - `created` — advance credit was created from a payment's unallocated remainder.
 - `applied` — advance credit was applied to a monthly bill.
-- `reversed` — a prior advance movement was undone by a correction.
+- `reversed` — a `created` movement was undone by a correction (advance credit clawed back). It never undoes an `applied` movement; restoring an applied allocation records a new `created` movement.
 
 ### import_batch_status
 
@@ -218,6 +220,7 @@ Tables are grouped by domain.
 | credential_version | INTEGER | NOT NULL DEFAULT 1 | Incremented on reset to revoke sessions |
 | is_active | BOOLEAN | NOT NULL DEFAULT true | |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 | rotated_at | timestamptz | | Last reset time |
 
 Notes:
@@ -238,6 +241,7 @@ Notes:
 | issued_at | timestamptz | NOT NULL | |
 | expires_at | timestamptz | NOT NULL | |
 | revoked_at | timestamptz | | Set on revocation |
+| created_at | timestamptz | NOT NULL | |
 
 Validity rule:
 
@@ -344,6 +348,7 @@ UNIQUE (room_id) WHERE status = 'active'
 | display_name | TEXT | NOT NULL | As entered |
 | normalized_name | TEXT | NOT NULL | Uppercased, punctuation-stripped, collapsed |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 
 Constraints:
 
@@ -364,11 +369,13 @@ UNIQUE (tenancy_id, normalized_name)
 | property_id | UUID | FK → property | Nullable; null = org-wide default |
 | standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | currency | CHAR(3) | NOT NULL | Fixed for MVP |
+| created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | NOT NULL | |
 | updated_by_admin_id | UUID | FK → admin_user | |
 
 Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
+- The standard amount is organization-wide and uniform across rooms; "global" in the ADRs means org-wide, not system-wide.
 - Bills snapshot the amount at generation time, so changing this value does not rewrite existing bills.
 
 #### billing_override
@@ -385,6 +392,7 @@ Notes:
 | reason | TEXT | | Optional |
 | created_by_admin_id | UUID | FK → admin_user | |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 
 Unique constraint: `UNIQUE (tenancy_id, billing_month)`.
 
@@ -392,7 +400,7 @@ Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemp
 
 #### standard_amount_change
 
-**standard_amount_change** — history of global standard-amount changes.
+**standard_amount_change** — history of org-wide standard-amount changes.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
@@ -400,6 +408,7 @@ Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemp
 | organization_id | UUID | FK → organization, NOT NULL | |
 | previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | auto_note | TEXT | NOT NULL | e.g. "Standard amount changed from X to Y" |
 | custom_note | TEXT | | Optional |
 | admin_id | UUID | FK → admin_user, NOT NULL | |
@@ -462,6 +471,7 @@ Notes:
 | billing_month | DATE | NOT NULL | First day of the month |
 | standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | Snapshot at generation |
 | final_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | After any adjustment |
+| currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | is_adjusted | BOOLEAN | NOT NULL DEFAULT false | |
 | created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | | |
@@ -488,6 +498,7 @@ Notes:
 | transaction_id | UUID | FK → transaction, NOT NULL | tenant_payment only |
 | monthly_bill_id | UUID | FK → monthly_bill, NOT NULL | |
 | amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
+| currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | allocation_type | allocation_type | NOT NULL DEFAULT automatic | |
 | reverses_allocation_id | UUID | FK → payment_allocation | Set for reversals |
 | created_at | timestamptz | NOT NULL | |
@@ -515,6 +526,7 @@ Append-only ledger of advance credit events. This exists for auditability and fr
 | transaction_id | UUID | FK → transaction, NOT NULL | The tenant payment that owns this advance |
 | movement_type | advance_movement_type | NOT NULL | created / applied / reversed |
 | amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
+| currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | monthly_bill_id | UUID | FK → monthly_bill | Set when movement_type = applied |
 | allocation_id | UUID | FK → payment_allocation | Set when applied; links to the allocation created |
 | note | TEXT | | Optional context |
@@ -525,7 +537,7 @@ Notes:
 - Append-only. No `updated_at`. No deletion in normal operation.
 - Written atomically in the same database transaction as the corresponding allocation or correction, so it cannot drift under normal operation.
 - A payment's advance can be applied in multiple chunks; each application is its own `applied` row.
-- Corrections are recorded as `reversed` rows, never by editing prior rows.
+- Corrections are recorded by appending new rows, never by editing prior rows: undoing a `created` movement appends a `reversed` row, while undoing an `applied` movement appends a new `created` movement (advance restored). A `reversed` row therefore always offsets a `created` movement, which keeps the reconciliation invariant sound.
 
 Why this table exists:
 - It gives auditors a clear, readable trail of advance credit (created, applied, reversed) without recomputing from raw allocations.
@@ -542,6 +554,7 @@ Why this table exists:
 | adjustment_type | TEXT | NOT NULL | `rate_change` or `write_off` |
 | previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | public_note | TEXT | | Visible to tenants |
 | internal_reason | TEXT | | Admin-only |
 | admin_id | UUID | FK → admin_user, NOT NULL | |
@@ -571,6 +584,7 @@ Global / system-wide. Seeded once for the whole application, not per organizatio
 | reference_label | TEXT | | e.g. "Meter number" |
 | is_active | BOOLEAN | NOT NULL DEFAULT true | |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 
 Notes:
 - Registry-driven. BEDC is the first provider.
@@ -641,6 +655,7 @@ Notes:
 | direction | direction | | Nullable; null = any direction |
 | category | TEXT | NOT NULL | tenant_payment / utility_bill_payment / ignored / excluded / unrecognized |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 
 Constraints:
 
@@ -675,6 +690,7 @@ Notes:
 | uploaded_at | timestamptz | NOT NULL | |
 | confirmed_at | timestamptz | | |
 | created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | | |
 
 Constraints:
 
@@ -734,6 +750,7 @@ Notes:
 | scope_id | UUID | NOT NULL | ID of the org or property |
 | setting_key | TEXT | NOT NULL | e.g. default_view |
 | setting_value | TEXT | NOT NULL | e.g. property / room / true / false |
+| created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | NOT NULL | |
 
 Constraints:
@@ -839,6 +856,8 @@ REQUIRED: derived_unallocated == logged_advance
 ```
 
 If these disagree, the system flags a reconciliation error. Because the movement log is append-only and independent of the derived computation, tampering with allocations (or with the log) breaks the equality and is detected. This is the mechanism that makes advance credit auditable and fraud-resistant.
+
+This identity assumes `reversed` only ever offsets a `created` movement. Restoring advance after an allocation is reversed is recorded as a new `created` movement, not as `reversed`; recording it as `reversed` would double-subtract and break the equality.
 
 ### 7.6 Net tenant position
 
@@ -980,6 +999,8 @@ These may be updated normally:
 - utility_provider
 - tenant_access_credential (rotation)
 - admin_user
+
+This list equals exactly the tables carrying `updated_at`. Two write-once operational tables are excluded: `tenant_session` and `staged_import_row`. Their rows are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits, and they are governed by Sections 11.3 and 11.4.
 
 ### 11.3 Staged row retention
 
