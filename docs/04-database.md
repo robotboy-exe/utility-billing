@@ -1,10 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.2.0`
+Version: `0.3.0`
 Status: Draft — design phase, no implementation yet
 Last Updated: 2026-09-16
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
+
+Changes in this version: Added billing override, standard-amount-change history, and typed bill adjustments (rate change / write-off) to support the resolved billing decisions.
 
 ---
 
@@ -367,6 +369,43 @@ Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
 - Bills snapshot the amount at generation time, so changing this value does not rewrite existing bills.
 
+#### billing_override
+
+**billing_override** — a per-tenancy, per-month decision to force-bill or force-skip.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | |
+| billing_month | DATE | NOT NULL | First day of month |
+| decision | TEXT | NOT NULL | `bill` or `skip` |
+| reason | TEXT | | Optional |
+| created_by_admin_id | UUID | FK → admin_user | |
+| created_at | timestamptz | NOT NULL | |
+
+Unique constraint: `UNIQUE (tenancy_id, billing_month)`.
+
+Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemption (`skip`). The lazy generator consults this table before creating a bill.
+
+#### standard_amount_change
+
+**standard_amount_change** — history of global standard-amount changes.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | |
+| previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
+| auto_note | TEXT | NOT NULL | e.g. "Standard amount changed from X to Y" |
+| custom_note | TEXT | | Optional |
+| admin_id | UUID | FK → admin_user, NOT NULL | |
+| effective_at | timestamptz | NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes: append-only. One row per rate change. Drives the rate-change bill adjustments.
+
 ---
 
 ### 6.5 Tenant Payment Ledger
@@ -435,6 +474,7 @@ Notes:
 - One bill per tenancy per month.
 - Status (unpaid/partial/paid) is derived, not stored.
 - `final_amount_minor` may differ from `standard_amount_minor` only via a recorded adjustment.
+- MVP locks `final_amount_minor = standard_amount_minor` except through a recorded adjustment. The separate `final_amount_minor` field intentionally preserves room for future proration without a schema change.
 
 ---
 
@@ -497,6 +537,7 @@ Why this table exists:
 |---|---|---|---|
 | id | UUID | PK | |
 | monthly_bill_id | UUID | FK → monthly_bill, NOT NULL | |
+| adjustment_type | TEXT | NOT NULL | `rate_change` or `write_off` |
 | previous_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | new_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | |
 | public_note | TEXT | | Visible to tenants |
@@ -508,6 +549,7 @@ Notes:
 - Append-oriented. Multiple adjustments produce multiple rows.
 - On adjustment, `monthly_bill.final_amount_minor` is updated to the latest `new_amount_minor`.
 - The adjustment must be visible to tenants per the architecture.
+- In MVP a bill adjustment is created only for a rate change or a write-off; arbitrary per-room overrides are not possible. The public note is auto-generated with an optional custom note, and the admin identity is visible to tenants.
 
 ---
 

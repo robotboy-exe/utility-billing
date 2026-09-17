@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.5.0`
+Version: `0.6.0`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-16
 Extends: `architecture.md` version `0.1.0`
@@ -18,6 +18,8 @@ This document is the single consolidated source of truth for the MVP architectur
 Those amendment files are now retired. Any future change should be made here directly or through a new ADR.
 
 Version 0.5.0 adds the advance movement ledger with its reconciliation invariant for fraud auditability, and clarifies that utility providers and import profiles are registered globally (system-wide).
+
+Version 0.6.0 resolves the billing and tenancy product decisions: automatic rolling bill generation, removal of per-room bill overrides in favor of rate-change-driven adjustments and debt write-offs, the move-in/move-out partial-month asymmetry, closed-tenancy portal access, and the property dashboard metrics.
 
 ---
 
@@ -157,8 +159,8 @@ The MVP includes:
   - Property-level billing information.
   - Full details of the tenant's own tenancy/room.
   - Property-level utility spend records.
-- Monthly bill generation using a standard monthly amount.
-- Explicit admin bill adjustments.
+- Automatic rolling monthly bill generation using a standard monthly amount.
+- Rate-change-driven bill adjustments and debt write-offs.
 - Public visibility of bill adjustments.
 - PDF statement import from the Payvice Avantus billing software (primary transaction source).
 - CSV statement import (secondary).
@@ -492,18 +494,16 @@ Allocations belong only to the Tenant Payment Ledger. Utility bill payments neve
 
 ### 7.10 Bill Adjustment
 
-Represents an explicit admin alteration to a monthly bill.
+Represents a recorded change to a monthly bill's final amount. Bill adjustments are **not** arbitrary per-room overrides. In MVP an adjustment is created only in two situations: a standard-amount (rate) change, or a debt write-off.
 
-Bill adjustments must be visible to tenants.
-
-A bill adjustment should record:
-
+A bill adjustment records:
 - The affected bill.
+- Adjustment type (`rate_change` or `write_off`).
 - Previous amount.
 - New amount.
-- Public note, optional.
+- Public note (auto-generated, with optional custom note).
 - Timestamp.
-- Admin identifier, visible only to admin.
+- Admin identifier, visible to tenants.
 
 ### 7.11 Utility Provider
 
@@ -725,14 +725,13 @@ This can be implemented using a credential version, session record, or equivalen
 
 ### 10.7 Tenancy closure and historical access
 
-Tenant portal access is primarily intended for active tenancies.
+When a tenancy is closed, its portal credential becomes inactive **permanently**. Closed tenancies do **not** retain tenant portal access, and there is no historical-access restoration.
 
-Default MVP behavior:
+A tenancy closes in one of two ways:
+- **Automatically:** when a new tenancy is created for the same room (only one active tenancy per room), the previous tenancy is closed.
+- **Manually:** the admin closes the tenancy directly.
 
-- When a tenancy is closed, its portal credential becomes inactive.
-- Admin may later restore or issue read-only historical access if required.
-
-This avoids old access codes exposing current property information after occupants leave.
+Closure sets the status to `closed`, records an end date, deactivates the portal credential, and **preserves all financial history**. Unpaid bills of closed tenancies remain visible to the admin, who may pursue the debt or write it off.
 
 ---
 
@@ -956,41 +955,62 @@ For MVP:
 
 ### 18.2 Bill generation
 
-Admin manually generates bills for a selected month.
+Bill generation is **automatic and rolling** (lazy generation).
 
-For the selected month, the system creates one monthly bill for each active tenancy.
+The billing engine generates a month's bills automatically the first time they are needed — when the dashboard loads, when a payment is processed, or when a report is requested.
 
 Rules:
-
+- Bills are generated lazily/on-demand, not by a scheduled background job.
+- Generation is idempotent: generating a bill that already exists does nothing.
+- Generation happens synchronously in response to real usage, respecting the free-hosting constraint (no background scheduler).
 - One bill per tenancy per month.
 - Vacant rooms do not receive bills.
-- Bill generation must be idempotent.
-- Running bill generation twice for the same month must not create duplicate bills.
 - Bills use the standard amount active at generation time.
-- Later changes to the standard amount do not silently rewrite existing bills.
+- Manual generation remains available as an optional admin action for backfilling, but is not required for normal operation.
 
-### 18.3 Explicit room/bill overrides
+### 18.3 Rate-change adjustments (no per-room overrides)
 
-Admin may explicitly alter a specific room's bill amount.
+There are **no arbitrary per-room bill amount adjustments.** The admin cannot pick a specific room and change just its amount.
 
-Examples:
+The only adjustable billing parameter is the **standard monthly amount**, which applies uniformly to all active rooms.
 
-- A room receives a discounted amount.
-- A room receives a special charge.
-- Admin corrects an incorrect bill.
+When the admin changes the standard amount mid-month:
+- The system calculates the delta between the old and new standard amounts.
+- **Unsettled bills for the current month** are adjusted by the delta via recorded bill adjustments.
+- **Future months** are generated at the new rate.
+- **Fully-paid/settled bills are never adjusted** (no retroactive charges).
+- **Past months are never adjusted, even if unpaid.**
 
-When admin explicitly alters a bill, the adjustment must be visible to tenants.
+All rate-change adjustments are:
+- Recorded via append-only bill adjustment records — never a silent rewrite.
+- Audited (who, when, old amount, new amount).
+- Accompanied by an auto-generated public note ("Standard amount changed from ₦X to ₦Y"), with an optional custom note.
+- Visible to tenants, including the admin's identity.
 
-### 18.4 Mid-month occupancy changes
+The model leaves room for future flexibility (e.g., new expense types) without changing this structure.
 
-MVP default:
+### 18.4 Partial-month billing (move-in / move-out asymmetry)
 
-- If a tenancy is active during a billing month, it receives a bill for that month.
-- The bill uses the full standard monthly amount.
-- Proration is not automatic.
-- Admin may explicitly override the bill amount if a partial charge is required.
+The asymmetry exists because of **when the information is available to the system.**
 
-This keeps billing predictable and simple.
+**Move-in partial month:**
+- The admin sets the tenancy start date mid-month at creation time.
+- At generation time the system can detect it is a partial month (start date ≠ 1st).
+- **Default:** not billed.
+- **Admin opt-in:** the admin can choose to bill it anyway, at the full standard amount.
+
+**Move-out partial month:**
+- At generation time the tenancy is still active with no end date; the system cannot know it will end mid-month.
+- **Default:** billed in full (treated as a full month).
+- After the tenancy closes, the admin can forego the final partial-month bill via a **write-off**.
+- If the admin has foreknowledge of the move-out, they can manually exempt the bill (skip it).
+
+**Billing overrides:**
+- A per-tenancy, per-month billing override lets the admin force-bill or force-skip a tenancy for a specific month. This serves both the move-in opt-in and the move-out foreknowledge skip.
+
+**Proration:**
+- Proration is **not** automatic and **not** the default.
+- The schema leaves room for future proration (`monthly_bill.final_amount` can differ from `standard_amount`), but MVP locks `final_amount = standard_amount`.
 
 ### 18.5 Payment allocation and the billing engine
 
@@ -1020,24 +1040,16 @@ Admin alterations to billing must be transparent.
 
 ### 19.1 What tenants can see
 
-If admin alters a specific room's bill, tenants can see:
-
-- That the bill was adjusted.
+Adjustments arise only from rate changes or write-offs. For either, tenants can see:
+- That the bill was adjusted and the adjustment type.
 - The final amount due.
-- The original or standard amount, if useful.
-- A public adjustment note, if provided.
-
-This applies to:
-
-- Members of the affected tenancy.
-- Other tenants in the same property viewing the property billing summary.
-- Admin.
+- The original or standard amount.
+- An auto-generated public note, plus any custom note.
+- The admin's identity.
 
 ### 19.2 What admin sees
 
 Admin sees everything tenants see, plus:
-
-- Who made the adjustment.
 - When the adjustment was made.
 - Internal reason, if provided.
 - Previous and new amounts.
@@ -1246,14 +1258,15 @@ Admin reporting should include:
 
 Tenant portal reporting should include:
 
-Property view:
+Property view (tenant-facing dashboard):
+- Total outstanding tenant debt across all rooms.
+- Total room count.
+- Fully paid room count (count only, no amount).
+- Progress ratio of fully-paid rooms to total rooms, clearly labeled, e.g. "15 of 22 rooms fully paid".
+- Current-month utility spend (amount paid to the utility provider / BEDC outflow for the current month).
+- Historical lookup: for any past month, the total utility spend (BEDC outflow) for that month. This is the **only** historical data exposed; historical months show the total amount only, with no room counts.
 
-- Property billing summary.
-- Room list.
-- Amount due per room.
-- Billing status per room.
-- Adjustment notices.
-- Property utility spend records.
+The historical figure is the amount paid **to the utility provider** (Utility Bill Payment Ledger), not tenant bill payments.
 
 My Room / My Tenancy view:
 
@@ -1638,33 +1651,19 @@ Consequences:
 - Access code reset is the primary revocation mechanism.
 - Individual tenant credentials may be added later if required.
 
-### ADR-010 — Bill Adjustment Transparency
-
-Status: Accepted.
+### ADR-010 — Rate-Change Adjustments and Write-Offs (revised)
+Status: Accepted (replaces the earlier per-bill-adjustment form).
 
 Context:
-
-Admin may need to alter a specific room's billing amount.
-
-Tenants should be able to see that a bill was altered.
+Arbitrary per-room bill overrides are fraud-prone and are removed. Adjustments must still be possible for legitimate reasons and must stay transparent.
 
 Decision:
-
-Explicit bill adjustments must be visible to tenants.
-
-The system must store:
-
-- Original or standard amount.
-- Final amount.
-- Adjustment timestamp.
-- Public adjustment note, optional.
-- Admin audit details.
+There are no arbitrary per-room bill amount overrides. Adjustments occur only as (a) rate-change adjustments, applied uniformly to unsettled current-month bills, or (b) debt write-offs. All adjustments are append-only, audited, preserve the original amount, carry an auto-generated public note with an optional custom note, and show the admin's identity to tenants.
 
 Consequences:
-
-- Bills must support adjustment metadata.
-- The tenant portal must display adjustment notices.
+- Bills support typed adjustment metadata (`rate_change`, `write_off`).
 - Silent rewriting of bill amounts is not allowed.
+- The tenant portal displays adjustment notices with admin identity.
 
 ### ADR-011 — Configurable Tenant Portal Default View
 
@@ -1715,7 +1714,7 @@ Admin-triggered synchronous operations are used for:
 
 - Statement import.
 - Transaction matching.
-- Bill generation.
+- Bill generation (lazy/rolling, triggered by real usage rather than a scheduler).
 - Payment allocation.
 
 Consequences:
@@ -1918,6 +1917,66 @@ Consequences:
 - No second mutable source of truth is introduced.
 - Reconciliation provides fraud detection.
 
+### ADR-022 — Automatic Rolling Bill Generation (Lazy)
+
+Status: Accepted.
+
+Context: Free hosting cannot run scheduled jobs, but billing should feel automatic and rolling.
+
+Decision: Bills are generated lazily/on-demand the first time the system needs them (dashboard load, payment processing, report request). Generation is idempotent and synchronous, requiring no background scheduler.
+
+Consequences: No manual monthly action is needed. The "manual generation" point in ADR-012 is revised. Reports trigger generation to stay accurate.
+
+### ADR-023 — No Per-Room Overrides; Rate-Change-Driven Adjustments
+
+Status: Accepted.
+
+Context: Per-room amount overrides are fraud-prone. Only the global standard amount should be adjustable.
+
+Decision: The standard monthly amount is the only adjustable billing parameter. When it changes, unsettled current-month bills are adjusted by the delta via recorded adjustments. Settled bills and past months are never adjusted.
+
+Consequences: Adjustments are uniform, systematic, and transparent. Arbitrary per-room overrides are not possible.
+
+### ADR-024 — Partial-Month Billing Asymmetry
+
+Status: Accepted.
+
+Context: The system knows about move-in at creation time but only learns of move-out after the fact.
+
+Decision: A move-in partial month is not billed by default (admin can opt in). A move-out partial month is billed in full by default (admin can forego via write-off after closure, or exempt with foreknowledge). A per-tenancy, per-month billing override supports both.
+
+Consequences: Billing reflects what the system knows at generation time. Admin overrides handle real-world exceptions.
+
+### ADR-025 — Debt Write-Offs, No Hard Deletes
+
+Status: Accepted.
+
+Context: Closed tenancies may leave unpaid debt the admin chooses to forego.
+
+Decision: Foregoing debt is an audited write-off that zeroes the outstanding balance. Financial records are never hard-deleted, so history stays verifiable and auditable.
+
+Consequences: Write-offs are recorded as typed bill adjustments. Closed-tenancy debt persists for pursuit or write-off.
+
+### ADR-026 — Closed Tenancies Lose Portal Access
+
+Status: Accepted.
+
+Context: Old access codes must not expose current property information after occupants leave.
+
+Decision: When a tenancy closes, its portal credential becomes permanently inactive. There is no historical-access restoration.
+
+Consequences: Closed tenancies cannot view the portal. Admin retains the records for pursuit or write-off.
+
+### ADR-027 — Property Dashboard Metrics
+
+Status: Accepted.
+
+Context: Tenants need a transparent property-level view of billing and utility spend.
+
+Decision: The property view shows total outstanding debt, total room count, fully-paid room count, a clearly labeled fully-paid/total ratio, current-month utility spend (BEDC outflow), and historical utility spend (BEDC outflow) as the only historical data.
+
+Consequences: Historical figures come from the Utility Bill Payment Ledger, not tenant payments. Historical months expose totals only, no room counts.
+
 ---
 
 ## 33. Remaining Detailed Design Documents
@@ -1969,13 +2028,9 @@ The following items should be resolved before implementation of the relevant mod
 1. Which free hosting providers will be used?
 2. What session lifetime should tenant sessions have?
 3. What rate-limiting rules should apply to tenant access attempts?
-4. Should property view show total outstanding balances, or only current-month amount due?
-5. Should admin be required to provide a public note when adjusting a bill?
-6. Should admin identity be visible to tenants for bill adjustments?
-7. Should closed tenancies be allowed historical portal access?
-8. Is the Payvice Avantus export format stable across billing-software versions?
-9. Should original PDFs eventually be retained in object storage for dispute resolution?
-10. What export formats are required for backup?
+4. Is the Payvice Avantus export format stable across billing-software versions?
+5. Should original PDFs eventually be retained in object storage for dispute resolution?
+6. What export formats are required for backup?
 
 Resolved or relocated items:
 
@@ -1984,6 +2039,10 @@ Resolved or relocated items:
 - Correction behavior after allocations is specified in `05-billing-engine.md`.
 - XLSX is demoted to a secondary/future source.
 - The PDF is confirmed text-based with a control-total row. A sample has been provided.
+- Should property view show total outstanding balances, or only current-month amount due? → Resolved: both, with specific metrics (ADR-027).
+- Should admin be required to provide a public note when adjusting a bill? → Resolved: auto-generated note with optional custom note.
+- Should admin identity be visible to tenants for bill adjustments? → Resolved: yes.
+- Should closed tenancies be allowed historical portal access? → Resolved: no (ADR-026).
 
 ---
 
@@ -2061,30 +2120,38 @@ Billing:
 22. Advance credit movements are recorded in an append-only ledger and reconciled against the derived balance; mismatches are flagged.
 23. Payment date does not determine billing month.
 24. The billing engine's reconciliation is final.
-25. Monthly bills use a standard amount unless explicitly overridden.
+25. Monthly bills use a uniform standard amount; there are no arbitrary per-room overrides.
 26. Bill generation is manual and idempotent.
 27. Existing bills are not silently rewritten when the standard amount changes.
+28. Bill generation is automatic and rolling (lazy), not manual.
+29. Rate changes adjust unsettled current-month bills by the delta; settled bills and past months are never adjusted.
+30. Rate-change adjustments carry an auto-generated public note and show the admin's identity.
+31. A move-in partial month is not billed by default; admin can opt in.
+32. A move-out partial month is billed in full by default; admin can forego via write-off after closure.
+33. Foregone debt is written off via an audited action; records are never hard-deleted.
+34. Proration is not automatic; the schema preserves room for it in the future.
 
 Visibility and access:
 
-28. Tenant portal default view is the property view.
-29. Tenants can also view their own tenancy/room details.
-30. Roommates in the same tenancy can see full tenancy details.
-31. Tenants in other rooms can see limited billing information for other rooms.
-32. Other-room visibility includes amount due, billing status, and adjustment notices.
-33. Tenant personal information in other rooms is hidden.
-34. Tenants can see property-level utility spend records for their property.
-35. Tenants cannot see information from other properties.
-36. Admin can see everything.
-37. Visibility rules are enforced server-side and are configurable for future changes.
-38. Admin bill adjustments are visible to tenants.
-39. Bill adjustments preserve historical amounts and are audited.
-40. Tenancy access uses a shared access code.
-41. Multiple concurrent tenant sessions are allowed.
-42. Tenant sessions are read-only.
-43. Resetting the access code invalidates existing tenant sessions.
+35. Tenant portal default view is the property view.
+36. Tenants can also view their own tenancy/room details.
+37. Roommates in the same tenancy can see full tenancy details.
+38. Tenants in other rooms can see limited billing information for other rooms.
+39. Other-room visibility includes amount due, billing status, and adjustment notices.
+40. Tenant personal information in other rooms is hidden.
+41. Tenants can see property-level utility spend records for their property.
+42. Tenants cannot see information from other properties.
+43. Admin can see everything.
+44. Visibility rules are enforced server-side and are configurable for future changes.
+45. Admin bill adjustments are visible to tenants.
+46. Bill adjustments preserve historical amounts and are audited.
+47. Tenancy access uses a shared access code.
+48. Multiple concurrent tenant sessions are allowed.
+49. Tenant sessions are read-only.
+50. Resetting the access code invalidates existing tenant sessions.
+51. Closed tenancies permanently lose tenant portal access.
 
 Hosting:
 
-44. The MVP avoids background jobs, webhooks, scheduled tasks, and email dependencies.
-45. The MVP is designed to run on free-tier hosting while preserving portability.
+52. The MVP avoids background jobs, webhooks, scheduled tasks, and email dependencies.
+53. The MVP is designed to run on free-tier hosting while preserving portability.
