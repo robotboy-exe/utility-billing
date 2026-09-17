@@ -10,7 +10,7 @@ The MVP needs an initial transaction ingestion mechanism to get financial data i
 
 CSV and XLSX statement imports were initially selected as the primary transaction ingestion mechanism for the MVP.
 
-*(Note: This decision was later superseded by **ADR-014**, which established the Payvice Avantus PDF as the primary ingestion source due to the billing software's export limitations. CSV and XLSX remain supported as secondary sources).*
+*(Note: This decision was later superseded by **ADR-014**, which established the Payvice Avantus PDF as the primary ingestion source due to the billing software's export limitations. CSV and XLSX remain available as secondary sources where practical).*
 
 ## Consequences
 

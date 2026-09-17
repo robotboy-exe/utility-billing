@@ -1,0 +1,29 @@
+# Secrets and local environment
+.env
+.env.*
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local databases, dumps, and scratch data
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+/data/
+/scratch/
+/tmp/

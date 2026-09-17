@@ -4,7 +4,7 @@
 
 ## Context
 
-Per-room amount overrides are fraud-prone. Only the global standard amount should be adjustable.
+Per-room amount overrides are fraud-prone. Only the organization-wide standard amount should be adjustable.
 
 ## Decision
 

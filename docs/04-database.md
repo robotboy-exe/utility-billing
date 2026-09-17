@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.3.2`
+Version: `0.4.0`
 Status: Draft — design phase, no implementation yet
 Last Updated: 2026-09-17
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Added a `currency CHAR(3) NOT NULL` column to every persisted money-bearing table (`monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`) and restated §3.5, naming NGN as the MVP currency. Closed the §3.2 timestamp gaps by adding `created_at` to `billing_config`, `portal_setting`, and `tenant_session`, and `updated_at` to every mutable table, then reconciled §11.2. Scoped advance-movement `reversed` semantics to undoing a `created` movement only, and changed "global standard amount" wording to "org-wide".
+Changes in this version: Added a `currency CHAR(3) NOT NULL` column to `import_batch` so control totals and ignored-summary amounts are explicitly denominated, keeping §3.5 universal with no new exception. Scoped the "global" wording to distinguish the standard amount (org-wide) from utility providers and import profiles (system-wide). Carried forward from 0.3.2: a `currency CHAR(3) NOT NULL` column on the remaining persisted money-bearing tables (`monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`), the §3.2 timestamp gaps (`created_at` on `billing_config`, `portal_setting`, `tenant_session`; `updated_at` on every mutable table), and the advance-movement `reversed` semantics scoped to undoing a `created` movement only.
 
 ---
 
@@ -375,7 +375,7 @@ UNIQUE (tenancy_id, normalized_name)
 
 Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
-- The standard amount is organization-wide and uniform across rooms; "global" in the ADRs means org-wide, not system-wide.
+- The standard amount is organization-wide and uniform across rooms. Used of the standard amount, "global" in the ADRs means org-wide; used of utility providers and import profiles, "global" means system-wide.
 - Bills snapshot the amount at generation time, so changing this value does not rewrite existing bills.
 
 #### billing_override
@@ -684,6 +684,7 @@ Notes:
 | statement_end_date | DATE | | |
 | totals_credit_minor | BIGINT | | From footer |
 | totals_debit_minor | BIGINT | | From footer |
+| currency | CHAR(3) | NOT NULL | Statement currency; MVP is NGN |
 | totals_status | totals_status | | valid / mismatch / missing |
 | statement_fingerprint | TEXT | | Hash for duplicate-statement detection |
 | ignored_summary | JSONB | | Counts/amounts for ignored categories |
@@ -701,6 +702,7 @@ UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')
 Notes:
 - `ignored_summary` may include TRANSFER/CHARGE/VAT counts and totals.
 - `ignored_summary` must never include commission data.
+- `totals_credit_minor`, `totals_debit_minor`, and any monetary amounts inside `ignored_summary` are expressed in the batch `currency`.
 - The partial unique index prevents committing the same statement twice while still allowing re-import after rejection.
 
 ---

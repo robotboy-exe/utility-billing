@@ -1,11 +1,11 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.8.2`
+Version: `0.8.3`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
 Last Updated: 2026-09-17
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
-Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`, and absorbs utility-billing-arch.md (architecture.md v0.1.0)
+Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md`; absorbs `utility-billing-arch.md` (architecture.md v0.1.0)
 
 ## Document Lineage
 
@@ -28,6 +28,8 @@ Version 0.8.0 refactors the document for leanness: extracts ADRs to `docs/adr/`,
 Version 0.8.1 reconciles the locked rules with the ADR library: bills are generated lazily only (no manual or scheduled generation), the standard amount has no per-tenancy override, and the visibility matrix is labelled as the configurable default policy.
 
 Version 0.8.2 clarifies that the standard amount is organization-wide (not system-wide), adds the move-out foreknowledge exemption to the partial-month summary, and removes a stray blockquote marker.
+
+Version 0.8.3 corrects a comma splice in the Supersedes line and softens the visibility-matrix config claim to match the example `portal_setting` keys in `04-database.md` §6.8.
 
 ---
 
@@ -757,7 +759,7 @@ Visibility is a policy concern enforced server-side. The frontend must not be tr
 The privacy boundary is the **tenancy**. Members of the same tenancy see full details. Members of other tenancies see limited property-level billing info. Tenants cannot see other properties. Admin sees everything.
 
 **9.2 Visibility Matrix**
-The values below are the MVP **default policy**. Each cell is configurable at organization or property scope through `portal_setting` (see `04-database.md` §6.8 and ADR-011), and enforcement is always server-side.
+The values below are the MVP **default policy**. The policy is configurable at organization or property scope through `portal_setting` (see `04-database.md` §6.8 and ADR-011); the keys listed there are examples, not an exhaustive mapping of every cell. Enforcement is always server-side.
 
 | Information | Same tenancy | Other rooms (same property) | Other properties | Admin |
 |---|---|---|---|---|
