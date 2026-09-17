@@ -1,9 +1,17 @@
-### ADR-022 — Automatic Rolling Bill Generation (Lazy)
+# ADR-022 — Automatic Rolling Bill Generation (Lazy)
 
-Status: Accepted.
+**Status:** Accepted
 
-Context: Free hosting cannot run scheduled jobs, but billing should feel automatic and rolling.
+## Context
 
-Decision: Bills are generated lazily/on-demand the first time the system needs them (dashboard load, payment processing, report request). Generation is idempotent and synchronous, requiring no background scheduler.
+Free hosting cannot run scheduled jobs, but billing should feel automatic and rolling.
 
-Consequences: No manual monthly action is needed. The "manual generation" point in ADR-012 is revised. Reports trigger generation to stay accurate.
+## Decision
+
+Bills are generated lazily/on-demand the first time the system needs them (dashboard load, payment processing, report request). Generation is idempotent and synchronous, requiring no background scheduler.
+
+## Consequences
+
+- No manual monthly action is needed.
+- The "manual generation" point in ADR-012 is revised.
+- Reports trigger generation to stay accurate.

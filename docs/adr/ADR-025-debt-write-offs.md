@@ -1,9 +1,16 @@
-### ADR-025 — Debt Write-Offs, No Hard Deletes
+# ADR-025 — Debt Write-Offs, No Hard Deletes
 
-Status: Accepted.
+**Status:** Accepted
 
-Context: Closed tenancies may leave unpaid debt the admin chooses to forego.
+## Context
 
-Decision: Foregoing debt is an audited write-off that zeroes the outstanding balance. Financial records are never hard-deleted, so history stays verifiable and auditable.
+Closed tenancies may leave unpaid debt the admin chooses to forego.
 
-Consequences: Write-offs are recorded as typed bill adjustments. Closed-tenancy debt persists for pursuit or write-off.
+## Decision
+
+Foregoing debt is an audited write-off that zeroes the outstanding balance. Financial records are never hard-deleted, so history stays verifiable and auditable.
+
+## Consequences
+
+- Write-offs are recorded as typed bill adjustments.
+- Closed-tenancy debt persists for pursuit or write-off.

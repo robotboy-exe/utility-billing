@@ -1,14 +1,14 @@
-### ADR-012 — Free-Hosting Synchronous MVP
+# ADR-012 — Free-Hosting Synchronous MVP
 
-Status: Accepted.
+**Status:** Accepted
 
-Context:
+## Context
 
 The MVP is expected to run on free-tier hosting.
 
 Free hosting may not support background jobs, cron jobs, persistent local files, or reliable email delivery.
 
-Decision:
+## Decision
 
 The MVP avoids:
 
@@ -25,7 +25,7 @@ Admin-triggered synchronous operations are used for:
 - Bill generation (lazy/rolling, triggered by real usage rather than a scheduler).
 - Payment allocation.
 
-Consequences:
+## Consequences
 
 - The system must tolerate cold starts.
 - Imports must be small enough to process synchronously.

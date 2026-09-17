@@ -1,12 +1,12 @@
-### ADR-009 — Shared Tenancy Access Code
+# ADR-009 — Shared Tenancy Access Code
 
-Status: Accepted.
+**Status:** Accepted
 
-Context:
+## Context
 
 Tenants need secure read-only access without full user management.
 
-Decision:
+## Decision
 
 Each tenancy uses a shared access code.
 
@@ -18,7 +18,7 @@ Sessions are issued per device/browser.
 
 Resetting the access code invalidates existing sessions.
 
-Consequences:
+## Consequences
 
 - The system cannot identify individual tenants by session.
 - Tenant portal actions are limited to read-only operations.

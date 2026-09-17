@@ -1,19 +1,19 @@
 # ADR-003 — Deployment-Model Independence
 
-Status: Accepted.
+**Status:** Accepted
 
-Context:
+## Context
 
 The application may be deployed as centralized multi-tenant SaaS, a dedicated
 deployment for a single customer, or a standalone/self-hosted installation. Core
 business rules must behave identically across these models.
 
-Decision:
+## Decision
 
 Business logic must not depend on whether the application is deployed as SaaS,
 dedicated, or standalone.
 
-Consequences:
+## Consequences
 
 No core business rule may assume one organization, one property, one deployment,
 SaaS-only operation, or self-hosted-only operation.

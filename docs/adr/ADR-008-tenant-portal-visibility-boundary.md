@@ -1,12 +1,12 @@
-### ADR-008 — Tenant Portal Visibility Boundary
+# ADR-008 — Tenant Portal Visibility Boundary
 
-Status: Accepted.
+**Status:** Accepted
 
-Context:
+## Context
 
 Tenants need secure access to billing information without exposing other tenants' personal or transaction details.
 
-Decision:
+## Decision
 
 The privacy boundary is the tenancy.
 
@@ -18,7 +18,7 @@ Tenants cannot see information from other properties.
 
 Admin can see everything.
 
-Consequences:
+## Consequences
 
 - The backend must enforce tenancy and property scopes.
 - The visibility policy must be server-side.

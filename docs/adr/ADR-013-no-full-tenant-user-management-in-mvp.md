@@ -1,14 +1,14 @@
-### ADR-013 — No Full Tenant User Management in MVP
+# ADR-013 — No Full Tenant User Management in MVP
 
-Status: Accepted.
+**Status:** Accepted
 
-Context:
+## Context
 
 The product should remain simple.
 
 Full tenant user management is not required initially.
 
-Decision:
+## Decision
 
 Tenants access the portal through tenancy access codes.
 
@@ -20,7 +20,7 @@ The MVP does not implement:
 - Tenant self-registration.
 - Individual tenant credentials.
 
-Consequences:
+## Consequences
 
 - Simpler implementation.
 - Lower friction for tenants.
