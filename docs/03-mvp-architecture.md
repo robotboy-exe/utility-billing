@@ -796,7 +796,7 @@ Reports derive from authoritative records.
 
 They must not maintain independent copies of financial truth.
 
-### 23.1 Admin reports
+### 11.1 Admin reports
 
 Admin reporting should include:
 
@@ -811,7 +811,7 @@ Admin reporting should include:
 - Utility spend by provider and month.
 - Import history.
 
-### 23.2 Tenant portal reports
+### 11.2 Tenant portal reports
 
 Tenant portal reporting should include:
 
@@ -835,7 +835,7 @@ My Room / My Tenancy view:
 - Advance or outstanding balance.
 - Bill adjustment details.
 
-### 23.3 Utility spend report
+### 11.3 Utility spend report
 
 A separate report derived from the Utility Bill Payment Ledger.
 
@@ -1026,30 +1026,29 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 | 002 | Multi-Tenant Architecture | Accepted | Supports SaaS, dedicated, and standalone. |
 | 003 | Deployment-Model Independence | Accepted | Logic doesn't depend on hosting model. |
 | 004 | Transaction Source Abstraction | Accepted | Normalizes all sources before billing. |
-| 005 | Statement Imports as MVP | Superseded | Superseded by ADR-014 (PDF primary). |
+| 005 | Statement Imports as MVP | Superseded by ADR-014 | Superseded by ADR-014 (PDF primary). |
 | 006 | Future Event-Driven Integrations | Accepted | Webhooks planned for future. |
 | 007 | Billing Engine Independence | Accepted | Billing logic isolated from sources/UI. |
 | 008 | Tenant Portal Visibility Boundary | Accepted | Privacy boundary is the tenancy. |
 | 009 | Shared Tenancy Access Code | Accepted | Roommates share one code; no individual logins. |
-| 010 | Rate-Change Adjustments & Write-Offs | Accepted | No per-room overrides; systematic adjustments only. |
-| 011 | Configurable Default View | Accepted | Property view default, configurable to Room. |
+| 010 | Rate-Change Adjustments and Write-Offs (revised) | Accepted (replaces the earlier per-bill-adjustment form) | No per-room overrides; systematic adjustments only. |
+| 011 | Configurable Tenant Portal Default View | Accepted | Property view default, configurable to Room. |
 | 012 | Free-Hosting Synchronous MVP | Accepted | No background jobs/cron; lazy generation. |
-| 013 | No Full Tenant User Management | Accepted | Shared codes instead of full user accounts. |
-| 014 | PDF as Primary Ingestion | Accepted | Payvice Avantus PDF is mandatory/primary. |
-| 015 | Category Mapping as Config | Accepted | Data-driven routing of statement rows. |
+| 013 | No Full Tenant User Management in MVP | Accepted | Shared codes instead of full user accounts. |
+| 014 | PDF Statement Import as Primary MVP Ingestion Source | Accepted | Payvice Avantus PDF is mandatory/primary. |
+| 015 | Category Mapping as Configuration | Accepted | Data-driven routing of statement rows. |
 | 016 | Utility Provider Registry | Accepted | BEDC first; registry-driven, not hardcoded. |
-| 017 | Separate Ledgers | Accepted | Tenant payments and utility spend never mix. |
-| 018 | Payment Date != Billing Month | Accepted | Allocation determines billing month. |
-| 019 | Commission Rows Excluded | Accepted | Commissions are fully discarded/ignored. |
-| 020 | Oldest-Outstanding-First Allocation | Accepted | Chronological filling of bills. |
-| 021 | Advance Movement Ledger | Accepted | Append-only log for advance credit auditability. |
-| 022 | Lazy Bill Generation | Accepted | Generated on-demand, not via scheduler. |
-| 023 | No Per-Room Overrides | Accepted | Only global standard amount is adjustable. |
-| 024 | Partial-Month Asymmetry | Accepted | Move-in skipped by default; move-out billed. |
-| 025 | Debt Write-Offs | Accepted | Audited zeroing of debt; no hard deletes. |
-| 026 | Closed Tenancies Lose Access | Accepted | Portal credentials permanently deactivated. |
+| 017 | Separate Tenant Payment and Utility Bill Payment Ledgers | Accepted | Tenant payments and utility spend never mix. |
+| 018 | Payment Date Does Not Determine Billing Month | Accepted | Allocation determines billing month. |
+| 019 | Commission Rows Fully Excluded | Accepted | Commissions are fully discarded/ignored. |
+| 020 | Chronological Oldest-Outstanding-First Allocation | Accepted | Chronological filling of bills. |
+| 021 | Advance Movement Ledger and Reconciliation | Accepted | Append-only log for advance credit auditability. |
+| 022 | Automatic Rolling Bill Generation (Lazy) | Accepted | Generated on-demand, not via scheduler. |
+| 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments | Accepted | Only global standard amount is adjustable. |
+| 024 | Partial-Month Billing Asymmetry | Accepted | Move-in skipped by default; move-out billed. |
+| 025 | Debt Write-Offs, No Hard Deletes | Accepted | Audited zeroing of debt; no hard deletes. |
+| 026 | Closed Tenancies Lose Portal Access | Accepted | Portal credentials permanently deactivated. |
 | 027 | Property Dashboard Metrics | Accepted | Outstanding debt, room ratios, BEDC outflow. |
-
 ---
 
 ## 17. Remaining Detailed Design Documents
