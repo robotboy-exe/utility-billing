@@ -1,3 +1,8 @@
+<!--
+Role: Reusable example brief for future /speckit.constitution runs. Not an active
+pending task — the Utility Billing constitution has been ratified; keep this file
+as a reference for writing new constitution briefs, not as outstanding work.
+-->
 Read docs/03-mvp-architecture.md, docs/04-database.md, docs/05-billing-engine.md, docs/06-transaction-ingestion.md, docs/adr/*, and the root README.md before writing anything.
 
 Derive Core Principles primarily from the ADRs in docs/adr — each accepted architectural decision should become a principle if it constrains how code gets written (not just a design note).
