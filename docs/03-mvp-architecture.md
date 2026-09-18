@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.8.3`
+Version: `0.8.4`
 Status: Draft — consolidated source of truth for accepted MVP design decisions
-Last Updated: 2026-09-17
+Last Updated: 2026-09-18
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 Supersedes: `03-mvp-architecture.md` v0.2.0, the PDF scope-promotion amendment, and `03-mvp-architecture-amendment-002.md` (retired; not in repo); absorbs `utility-billing-arch.md` (architecture.md v0.1.0)
 
@@ -30,6 +30,8 @@ Version 0.8.1 reconciles the locked rules with the ADR library: bills are genera
 Version 0.8.2 clarifies that the standard amount is organization-wide (not system-wide), adds the move-out foreknowledge exemption to the partial-month summary, and removes a stray blockquote marker.
 
 Version 0.8.3 corrects a comma splice in the Supersedes line and softens the visibility-matrix config claim to match the example `portal_setting` keys in `04-database.md` §6.8.
+
+Version 0.8.4 registers the doc-conventions policy as numbered document `13-doc-conventions.md` (0.1.0) in the planned document set index and the Written list.
 
 ---
 
@@ -1083,12 +1085,13 @@ docs/
 ├── 09-security.md
 ├── 10-deployment.md
 ├── 11-testing.md
-└── 12-roadmap.md
+├── 12-roadmap.md
+└── 13-doc-conventions.md
 ```
 
 Document status:
 
-- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, and `docs/adr/` (ADR-001 through ADR-027).
+- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-027).
 - Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, and `07`–`12`.
 
 The most important remaining documents are:
