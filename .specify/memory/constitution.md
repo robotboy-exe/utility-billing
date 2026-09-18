@@ -1,14 +1,3 @@
-<!--
-SYNC IMPACT REPORT (temporary scratch — remove before committing)
-Version change: 0.0.0 (unversioned template) → 1.0.0
-Modified principles: (none — initial adoption)
-Added sections: Core Principles; Database & Schema Discipline; Tech Stack &
-  Deployment Constraints; Governance
-Removed sections: (none)
-Deferred TODOs:
-  - (resolved) versioning policy and compliance review cadence now codified in
-    the Governance section (v1.1.0).
--->
 # Utility Billing Constitution
 
 ## Core Principles
