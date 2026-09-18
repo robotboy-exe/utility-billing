@@ -6,8 +6,8 @@ Added sections: Core Principles; Database & Schema Discipline; Tech Stack &
   Deployment Constraints; Governance
 Removed sections: (none)
 Deferred TODOs:
-  - OPEN QUESTION: no explicit constitution versioning policy or compliance
-    review cadence is decided in the docs — fill in governance once decided.
+  - (resolved) versioning policy and compliance review cadence now codified in
+    the Governance section (v1.1.0).
 -->
 # Utility Billing Constitution
 
