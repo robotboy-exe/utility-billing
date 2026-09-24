@@ -22,7 +22,7 @@ A fresh deployment begins by establishing the structural and identity tables on 
 
 **Acceptance Scenarios**:
 
-1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, and `sender_alias` all exist with UUID primary keys and `created_at` timestamps.
+1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `admin_user`, `tenant_access_credential`, and `tenant_session` all exist with UUID primary keys and `created_at` timestamps.
 2. **Given** one active tenancy for a room, **When** an administrator attempts to open a second active tenancy for the same room, **Then** the schema rejects it (partial unique index on active tenancy per room).
 3. **Given** a tenancy with a sender alias, **When** a duplicate normalized sender name is added for that tenancy, **Then** it is rejected by the `(tenancy_id, normalized_name)` uniqueness rule.
 4. **Given** an active access credential, **When** it is rotated, **Then** the stored version increments and previously issued sessions no longer satisfy the validity rule.
@@ -149,7 +149,7 @@ The operational wrapper that makes the schema usable across environments: one re
 - **FR-009**: System MUST store derived state only by computation from authoritative records: bill status, bill remaining, tenancy outstanding, advance balance, net position, and utility spend MUST be derivable via the computations in `docs/04` §7 and MUST NOT be stored as independently mutable columns.
 - **FR-010**: System MUST provision the append-only advance movement ledger and enforce the reconciliation invariant that derived unallocated balance equals the logged advance movements per `docs/04` §7.5.
 - **FR-011**: System MUST expose the duplicate-detection keys in `docs/04` §10: a unique `duplicate_key` on transactions and staged rows, and a statement fingerprint with a partial unique index on import batches in `confirmed`/`completed` status.
-- **FR-012**: System MUST enforce the cross-table constraints in `docs/04` §8, enforceable within database transactions at the service layer: allocation cap, advance reconciliation, ledger separation, commissions-never-stored, one-active-tenancy-per-room, one-bill-per-tenancy-per-month, audited bill-amount changes, and organization scoping.
+- **FR-012**: System MUST enforce the cross-table constraints in `docs/04` §8: ledger separation, commissions-never-stored, one-active-tenancy-per-room, one-bill-per-tenancy-per-month, audited bill-amount changes, and organization scoping. Logic-dependent invariants (allocation cap, advance reconciliation) ship as the columns/FKs/tests that make them enforceable and are enforced by the billing-engine feature (constitution Principle II), with the verification covered by SC-004.
 - **FR-013**: System MUST create the tables, unique constraints, and per-query performance indexes recommended in `docs/04` §9.
 - **FR-014**: System MUST deliver the schema as reversible migrations, such that the schema can be applied and rolled back cleanly, and MUST be structurally consistent between the production database engine and the local-development database engine (constitution Database & Schema; `docs/04` §12).
 - **FR-015**: System MUST provide idempotent seed data for the MVP: one organization, one admin user, one global import profile (`PAYVICE_AVANTUS`), channel/category mappings, one global utility provider (`BEDC`), a default org-wide `billing_config`, and default portal settings (`docs/04` §12).
@@ -176,7 +176,7 @@ The operational wrapper that makes the schema usable across environments: one re
 ### Measurable Outcomes
 
 - **SC-001**: A fresh database can apply the full schema from zero with no errors in under 2 minutes on standard infrastructure.
-- **SC-002**: 100% of the append-only financial tables reject in-place updates and hard deletes at the storage layer once a row is written.
+- **SC-002**: 100% of the append-only financial tables reject in-place updates and hard deletes once a row is written — enforced natively at the storage layer on PostgreSQL (validated in CI/deploy) and via the equivalent app-layer + test guarantees on SQLite (local).
 - **SC-003**: 0 commission rows can be persisted, staged, or logged across the schema (verified by attempting every commission-mapped channel).
 - **SC-004**: The advance reconciliation invariant (derived unallocated balance == logged advance movements) holds for: overpayment, partial application, applied-then-reversed, and multi-chunk application scenarios.
 - **SC-005**: Every migration is reversible — a complete up-then-down cycle (and re-apply) leaves the database clean and seed-free without errors.
@@ -193,4 +193,4 @@ The operational wrapper that makes the schema usable across environments: one re
 - The architectural choice of the data-access layer and migration tooling is already locked by `docs/03` §6.6 and the constitution; this spec captures the deliverable and its invariants, and the isolated tooling references reflect already-decided constraints rather than new implementation detail.
 - The production database engine is PostgreSQL with SQLite used only for local development (constitution Database & Schema).
 - The first implementation pass targets **User Story 1 only** (Structural & Identity Foundation), per the MVP-first strategy in `tasks.md`; the remaining user stories and polish are planned for subsequent passes.
-- Locally, **SQLite is the only validated engine** (no local PostgreSQL on the dev machine). PostgreSQL-native DDL — immutable-table triggers and `postgresql_where` partial unique indexes (spec §3 SC-002) — is authored in the code now but **validated in CI/deploy**, not locally. Consequently SC-005/SC-006/SC-007 and the Postgres-native acceptance scenarios are confirmed in CI/deploy; the SQLite scenarios are confirmed locally.
+- Locally, **SQLite is the only validated engine** (no local PostgreSQL on the dev machine). PostgreSQL-native DDL — immutable-table triggers and `postgresql_where` partial unique indexes (spec SC-002) — is authored in the code now but **validated in CI/deploy**, not locally. Consequently SC-005/SC-006/SC-007 and the Postgres-native acceptance scenarios are confirmed in CI/deploy; the SQLite scenarios are confirmed locally.

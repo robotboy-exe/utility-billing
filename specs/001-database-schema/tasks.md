@@ -40,7 +40,8 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Create shared base mixins and money/currency helpers in `backend/src/models/base.py` — mixins `IdCreatedAt` (UUID id, created_at), `OrgScoped` (organization_id FK), `UpdatedAt` (updated_at only on mutable tables); `money()` helper (column suffix `_minor`, type `BIGINT`, `CHECK (>= 0)` or `CHECK (> 0)` per docs/04, always a non-negative magnitude), `currency()` helper (`CHAR(3) NOT NULL`, default `NGN`)
+- [ ] T004 Create shared base mixins and money/currency helpers in `backend/src/models/base.py` — mixins `IdCreatedAt` (UUID id, created_at), `OrgScoped` (organization_id FK), `UpdatedAt` (updated_at only on mutable tables); `money()` helper (column suffix `_minor`, type `BIGINT`; default `CHECK (>= 0)`, with a `positive=True` variant emitting `CHECK (> 0)` used ONLY where docs/04 specify `> 0` — e.g. `transaction.amount_minor`), `currency()` helper (`CHAR(3) NOT NULL`, default `NGN`)
+- [ ] T033 [P] Money/currency tests in `tests/test_money.py` for the `money()`/`currency()` helpers from `backend/src/models/base.py` (T004): integer minor-unit magnitude, per-table `CHECK (>= 0)` vs `CHECK (> 0)` contract (contracts/schema.md §3.4), `CHAR(3)` currency default `NGN`, no floating-point storage (Principle I). Write FIRST and confirm they fail before/while T004 lands.
 - [ ] T005 [P] Create all `enum.StrEnum` definitions in `backend/src/enums.py` for docs/04 §4: `tenancy_status` (`draft active closed`), `record_category` (`tenant_payment utility_bill_payment`), `direction` (`credit debit`), `matching_status` (`unmatched ambiguous matched manually_matched not_applicable`), `allocation_type` (`automatic manual correction reversal`), `advance_movement_type` (`created applied reversed`), `import_batch_status` (`parsing staged duplicate_statement totals_mismatch confirmed rejected completed failed`), `totals_status` (`valid mismatch missing`)
 - [ ] T006 [P] Create `backend/src/db.py` engine/session/config reading `DATABASE_URL` — PostgreSQL for production, SQLite for local development (constitution Database & Schema)
 - [ ] T007 [P] Initialize Alembic scaffolding: `backend/src/migrations/alembic.ini`, `backend/src/migrations/env.py`, empty `backend/src/migrations/versions/`
@@ -104,7 +105,7 @@
 
 - [ ] T018 [P] [US3] Create transaction model in `backend/src/models/ledger.py` (constraint verbatim: `CHECK (record_category IN ('tenant_payment', 'utility_bill_payment'))`; amount_minor `CHECK (> 0)`; duplicate_key TEXT NOT NULL UNIQUE; matching_status enum; currency)
 - [ ] T019 [P] [US3] Create advance_movement model in `backend/src/models/ledger.py` (append-only, no updated_at; movement_type created/applied/reversed; monthly_bill_id+allocation_id set when applied; reversed only offsets created per docs/04 §7.5)
-- [ ] T020 [P] [US3] Create monthly_bill, payment_allocation, bill_adjustment models in `backend/src/models/billing_ledger.py` (monthly_bill `UNIQUE (tenancy_id, billing_month)`; bill status derived not stored; payment_allocation allocation_type enum + reverses_allocation_id; bill_adjustment adjustment_type rate_change|write_off, previous/new amounts; allocation-cap enforced in service layer within a DB transaction)
+- [ ] T020 [P] [US3] Create monthly_bill, payment_allocation, bill_adjustment models in `backend/src/models/billing_ledger.py` (monthly_bill `UNIQUE (tenancy_id, billing_month)`; bill status, bill remaining, tenancy outstanding and net position are derived, never stored (FR-009); payment_allocation allocation_type enum + reverses_allocation_id; bill_adjustment adjustment_type rate_change|write_off, previous/new amounts; allocation-cap invariant (I-1) ships via the FKs/columns enabling it and is verified by test T015 — the cap itself is enforced by the billing engine in a later feature (Principle II), since this schema feature has no service layer)
 
 **Checkpoint**: User Story 3 (core financial domain) independently functional and reconciled
 
@@ -140,8 +141,8 @@
 
 ### Implementation for User Story 5
 
-- [ ] T024 [P] [US5] Create import_profile, import_channel_category_mapping models in `backend/src/models/ingestion.py` (import_profile global organization_id nullable; mapping constraints verbatim: `UNIQUE (import_profile_id, channel, COALESCE(direction, 'ANY'))`, `CHECK (category IN ('tenant_payment','utility_bill_payment','ignored','excluded','unrecognized'))`; COMMISSION → excluded)
-- [ ] T025 [P] [US5] Create import_batch, staged_import_row models in `backend/src/models/ingestion.py` (import_batch: currency CHAR(3) default NGN, totals_status enum, statement_fingerprint partial unique `WHERE status IN ('confirmed','completed')`, status enum; staged_import_row: `CHECK (row_category IN ('tenant_payment','utility_bill_payment'))`, parse_status, committed_transaction_id write-once, no updated_at)
+- [ ] T024 [P] [US5] Create import_profile, import_channel_category_mapping models in `backend/src/models/ingestion.py` (import_profile global organization_id nullable; mapping constraints verbatim: `UNIQUE (import_profile_id, channel, COALESCE(direction, 'ANY'))`, `CHECK (category IN ('tenant_payment','utility_bill_payment','ignored','excluded','unrecognized'))`; COMMISSION → excluded; NOTE best name kept as `category` per data-model §6/contracts §2 — this is the channel→route target config, distinct from `record_category` (persisted transaction type, T005) and `row_category` (staged row type, T025), which must stay separate in code)
+- [ ] T025 [P] [US5] Create import_batch, staged_import_row models in `backend/src/models/ingestion.py` (import_batch: currency CHAR(3) default NGN, totals_status enum, statement_fingerprint partial unique `WHERE status IN ('confirmed','completed')`, status enum; staged_import_row: `CHECK (row_category IN ('tenant_payment','utility_bill_payment'))`, `duplicate_key` TEXT NOT NULL UNIQUE, parse_status, committed_transaction_id write-once, no updated_at)
 
 **Checkpoint**: User Stories 1-5 independently functional
 
@@ -185,7 +186,7 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T031 Run `quickstart.md` validation end-to-end on SQLite and PostgreSQL; confirm SC-001..SC-007
+- [ ] T031 Run `quickstart.md` validation end-to-end on SQLite and PostgreSQL; confirm SC-001..SC-007; measure fresh-apply duration against SC-001 (< 2 min) and record the result
 - [ ] T032 Verify `checklists/requirements.md` fully satisfied; final docs/commit pass (no commit unless separately requested)
 
 ---

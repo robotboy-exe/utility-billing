@@ -78,8 +78,8 @@ backend/
     │   ├── identity.py    # admin_user, tenant_access_credential, tenant_session
     │   ├── org.py         # organization, property, room
     │   ├── tenancy.py     # tenancy, tenant, sender_alias
-    │   ├── billing.py     # billing_config, billing_override, standard_amount_change,
-    │   │                  #   monthly_bill, payment_allocation, bill_adjustment
+    │   ├── billing_config.py # billing_config, billing_override, standard_amount_change
+    │   ├── billing_ledger.py # monthly_bill, payment_allocation, bill_adjustment
     │   ├── ledger.py      # transaction, advance_movement
     │   ├── utility.py     # utility_provider, utility_bill_payment
     │   ├── ingestion.py   # import_profile, import_channel_category_mapping,
@@ -97,11 +97,15 @@ tests/
 ├── conftest.py            # SQLite per-test DB (and Postgres-capable)
 ├── test_schema.py         # SC-00x structural/reversibility/equivalence
 ├── test_seed.py           # SC-006 idempotent seed
-├── test_money.py          # Principle I money/currency
-├── test_immutable.py      # SC-002 append-only
-├── test_separation.py     # I-3 two-ledger
-├── test_invariants.py     # I-1 allocation cap, I-2 advance reconciliation
-└── test_uniqueness.py     # active tenancy, bill-per-month, duplicate keys
+├── test_money.py          # Principle I money/currency (T033)
+├── test_identity.py       # US1 credential rotation / session validity (T009)
+├── test_uniqueness.py     # US1 active tenancy, sender_alias normalisation (T008)
+├── test_billing_config.py # US2 override uniqueness, append-only change (T013)
+├── test_immutable.py      # SC-002 append-only (T017)
+├── test_invariants.py     # I-1 allocation cap, I-2 advance reconciliation (T015/T016)
+├── test_separation.py     # I-3 two-ledger (T021)
+├── test_ingestion.py      # US5 commission-never-stored / staging (T023)
+└── test_settings_audit.py # US6 portal_setting/audit_log (T026)
 ```
 
 **Structure Decision**: **Single `backend/` project** (Option 2 trimmed to the data layer). The constitution locks a Python + FastAPI backend (`03` §6.6); this feature delivers only the database/data-access slice of it (`models/`, `enums.py`, `db.py`, `seed.py`, `migrations/`) plus tests. The frontend (`frontend/`) and API layer are separate features and are intentionally absent here. Models are grouped by domain per `docs/03` §6.7 modules to honor domain isolation and keep each module independently reviewable/testable. `contracts/schema.md` documents the DB-level contract.
