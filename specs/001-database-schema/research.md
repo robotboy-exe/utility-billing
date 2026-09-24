@@ -4,6 +4,10 @@
 
 This document resolves the unknowns listed in Technical Context (plan.md) for implementing the full schema from `docs/04-database.md` as SQLAlchemy models + Alembic migrations, with PostgreSQL for production and SQLite for local development/testing. Every decision is grounded in `docs/04`, the ratified constitution, and the locked ADRs.
 
+**Locked execution decisions (2026-09-21)**:
+- **First implementation pass = User Story 1 only** (Structural & Identity Foundation), per tasks.md MVP strategy.
+- **SQLite is the only engine validated locally** (no local PostgreSQL on the dev machine). Postgres-native DDL (immutable triggers, `postgresql_where` partial unique indexes) is authored in the code but **validated in CI/deploy**, not locally. All decisions below are therefore phrased so the SQLite path is locally runnable and complete for US1.
+
 ---
 
 ## R-1: Enum strategy
@@ -35,12 +39,12 @@ This document resolves the unknowns listed in Technical Context (plan.md) for im
   - **SQLite**: no partial index; enforce the identical invariants in the **application/service layer** and cover them in tests.
 - **Rationale**: Postgres gets native integrity (the production DB is the source of truth per constitution); SQLite is dev-only and the invariant is still guaranteed by app-layer checks + tests. This matches `docs/04` §8's stance that row-spanning invariants are enforced in the service layer within transactions.
 - **Alternatives considered**: Composite `(room_id, status)` unique index (rejects multiple closed historical tenancies — incorrect); giving up the invariant on SQLite (unacceptable).
-- **Divergence note**: Recorded in `contracts/schema.md` and `quickstart.md`; invariants are tested equivalently on both engines.
+- **Divergence note**: Recorded in `contracts/schema.md` and `quickstart.md`; invariants are tested equivalently on both engines. PostgreSQL partial indexes are authored in the code now but exercised in CI/deploy (no local Postgres).
 
 ## R-5: Immutable (append-only) table write enforcement
 
 - **Question**: How do the 7 immutable financial tables (`transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`) reject in-place UPDATE/DELETE (spec SC-002)?
-- **Decision**: **Postgres** `BEFORE UPDATE` / `BEFORE DELETE` triggers (raise exception) on the immutable tables; **SQLite** relies on application-layer guards plus tests asserting no ORM UPDATE/DELETE path exists.
+- **Decision**: **Postgres** `BEFORE UPDATE` / `BEFORE DELETE` triggers (raise exception) on the immutable tables; **SQLite** relies on application-layer guards plus tests asserting no ORM UPDATE/DELETE path exists. Postgres triggers are authored now but validated in CI/deploy (not locally).
 - **Rationale**: Satisfies SC-002's "reject at the storage layer" literally on production Postgres while keeping SQLite simple. Append-only is a policy enforced by schema; corrections go through reversal/correction rows (`docs/04` §11.1, constitution Principle I).
 - **Alternatives considered**: App-layer only (fails SC-002 "storage layer" wording); SQLite triggers too (optional — kept app-layer for simplicity; documented).
 

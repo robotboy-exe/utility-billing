@@ -66,13 +66,13 @@ PostgreSQL (native):
 - `UNIQUE (room_id) WHERE status='active'` on `tenancy` (I-5).
 - `UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')` on `import_batch`.
 
-SQLite (divergence documented — R-4): SQLite has no partial indexes. Same invariants are enforced by the **application/service layer** and covered by tests. This is the **only** accepted engine divergence for invariants.
+SQLite (divergence documented — R-4): SQLite has no partial indexes. Same invariants are enforced by the **application/service layer** and covered by tests. This is the **only** accepted engine divergence for invariants. PostgreSQL partial indexes are authored in the code now but exercised in CI/deploy (no local Postgres).
 
 ## 5. Immutability (append-only) contract
 
 The following tables are append-only: `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log` (R-5, spec SC-002).
 
-PostgreSQL: `BEFORE UPDATE` / `BEFORE DELETE` triggers raise an exception on these tables.
+PostgreSQL: `BEFORE UPDATE` / `BEFORE DELETE` triggers raise an exception on these tables (**authored now, validated in CI/deploy — no local Postgres**).
 SQLite (divergence): application-layer guards; no UPDATE/DELETE write path; tests assert immutability.
 
 Corrections must use reversal/correction rows (`advance_movement` created/applied/reversed semantics in §7.5), never edits or hard deletes.

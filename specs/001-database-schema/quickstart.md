@@ -7,7 +7,7 @@ This is a runnable validation guide proving the schema works end-to-end. Design 
 ## Prerequisites
 
 - Python 3.11+ environment with the project dependency set (SQLAlchemy 2.x, Alembic, pytest; psycopg for the Postgres path).
-- Optionally, access to a PostgreSQL instance for the production-engine validation (SQLite covers local/dev).
+- PostgreSQL access is **only required for the CI/deploy validation path**. Locally, **SQLite is the only engine validated** (no PostgreSQL available on the dev machine); Postgres-native DDL (immutable triggers, `postgresql_where` partial unique indexes) is present in the code but exercised in CI/deploy.
 - `DATABASE_URL` configurable (default: SQLite for dev).
 
 ## Setup
@@ -23,7 +23,7 @@ alembic -c alembic.ini upgrade head
 ./scripts/seed.py
 ```
 
-For PostgreSQL, set `DATABASE_URL=postgresql+psycopg://...` and run the same `upgrade head` then seed.
+For the PostgreSQL path (CI/deploy only — not run locally), set `DATABASE_URL=postgresql+psycopg://...` and run the same `upgrade head` then seed.
 
 ## Validation scenarios
 
@@ -37,7 +37,7 @@ DATABASE_URL=postgresql+psycopg://... pytest   # production engine smoke + invar
 ### 1. Fresh schema + reversibility (SC-005, SC-007)
 - Apply `upgrade head` from empty → no errors; all 25 tables, indexes, and constraints exist (list in [data-model.md](data-model.md)).
 - `alembic downgrade base` then `upgrade head` again → clean, seed-free, no errors.
-- Structural equivalence: parse the applied structure and assert the table/column/constraint set matches on SQLite and PostgreSQL ([contracts/schema.md](contracts/schema.md) §1).
+- Structural equivalence (SC-007): assert the table/column/constraint set matches on SQLite and PostgreSQL. **PostgreSQL side is deferred to CI/deploy** (no local Postgres).
 
 ### 2. Seed idempotency (SC-006)
 - Run seed twice → second run is a no-op (no duplicate org/admin/profile/provider/config; counts unchanged).
@@ -47,7 +47,7 @@ DATABASE_URL=postgresql+psycopg://... pytest   # production engine smoke + invar
 
 ### 4. Immutability of financial tables (SC-002)
 - Insert a row into each of the 7 immutable tables, then attempt `UPDATE` and `DELETE` on it.
-- PostgreSQL: the operation is rejected by trigger.
+- PostgreSQL: the operation is rejected by trigger (**validated in CI/deploy, not locally**).
 - SQLite: the application layer rejects it; tests assert no update/delete path.
 
 ### 5. Commissions never stored (SC-003)

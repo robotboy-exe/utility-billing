@@ -49,6 +49,7 @@ Re-evaluated after data-model/contracts/quickstart design (R-1…R-10):
 - All money remains integer minor units + currency (R-8); no float introduced.
 - All 7 financial tables remain append-only (R-5, §5 contracts).
 - The two accepted divergences (partial indexes and immutable triggers app-layer on SQLite) still enforce the same invariants via app-layer + tests; production PostgreSQL retains native integrity — is this a violation? No: the production DB is the source of truth and keeps native enforcement; SQLite is dev-only. Conforms with documents/§8 service-layer stance. **PASS**
+- **Locked execution (2026-09-21)**: first implementation pass = **User Story 1 only** (MVP); **SQLite is the only locally-validated engine**, with PostgreSQL-native DDL (partial indexes, immutable triggers, SC-007 equivalence) authored now but validated in CI/deploy rather than locally. This does not change the conforming conclusion above (SQLite app-layer + tests preserve the invariants locally; Postgres proves them natively in CI). **PASS**
 
 ## Project Structure
 

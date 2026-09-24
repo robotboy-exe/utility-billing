@@ -6,6 +6,10 @@
 
 **Tests**: The feature is the financial schema; the constitution requires test-first for financial logic (Principle V), so test tasks ARE included and MUST be written before implementation within each story.
 
+**Locked execution decisions**:
+- **Scope (first pass)**: MVP-first — only **User Story 1** (Structural & Identity Foundation) is implemented in the first pass (Setup → Foundational → US1 → stop at checkpoint). Story phases US2–US7 are planned for subsequent passes.
+- **Database (first pass)**: **SQLite-only** for local development and validation (no local PostgreSQL on the dev machine). PostgreSQL-native DDL (immutable triggers, `postgresql_where` partial unique indexes) is authored in the code now but **validated only in CI/deploy**, not locally. Any Postgres-dependent validation (e.g. SC-007 equivalence) is deferred to CI.
+
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -243,35 +247,31 @@ Task: "Create admin_user, tenant_access_credential, tenant_session models in bac
 
 ## Implementation Strategy
 
-### MVP First (User Story 1 Only)
+### MVP First (User Story 1 Only) — THE CURRENT PASS
 
 1. Complete Phase 1: Setup
 2. Complete Phase 2: Foundational (CRITICAL - blocks all stories)
 3. Complete Phase 3: User Story 1
-4. **STOP and VALIDATE**: Test User Story 1 independently
+4. **STOP and VALIDATE**: Test User Story 1 independently (SQLite)
 5. Deploy/demo if ready
 
 ### Incremental Delivery
 
 1. Complete Setup + Foundational → Foundation ready
-2. Add User Story 1 → Test independently (MVP)
-3. Add User Story 2 → Test independently
-4. Add User Story 3 → Test independently (adds core financial ledger)
-5. Add US4, US5, US6 → Test independently each
-6. Add User Story 7 (baseline migration + seed + portability) → full deliverable
-7. Each story adds value without breaking previous stories
+2. Add User Story 1 → Test independently (SQLite) → Deploy/Demo (MVP) — **current pass ends here**
+3. Later passes: US2 → US3 → US4 → US5 → US6 → US7, each tested independently on SQLite
+4. PostgreSQL-native validation (triggers, partial indexes, SC-007 equivalence) runs in CI/deploy, not locally
+5. Each story adds value without breaking previous stories
 
 ### Parallel Team Strategy
 
-With multiple developers:
+With multiple developers (future passes; current pass is US1-only):
 
 1. Team completes Setup + Foundational together
-2. Once Foundational is done (staff independently):
-   - Developer A: User Story 1
-   - Developer B: User Story 2 then 3 (billing chain)
-   - Developer C: User Story 4
-   - Developer D: User Stories 5 and 6
-3. User Story 7 (migration/seed/portability) is a serial integration pass once models exist
+2. Once Foundational is done (first pass staffs only US1):
+   - Developer A: User Story 1 (current pass)
+   - Subsequent passes: Developer B: US2 → US3 (billing chain); Developer C: US4; Developer D: US5 and US6
+3. User Story 7 (migration/seed/portability) is a serial integration pass once models exist; its Postgres assertions run in CI/deploy
 
 ---
 
