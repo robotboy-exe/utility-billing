@@ -1,0 +1,79 @@
+{
+  "status": "tasks_appended",
+  "convergence_phase": 2,
+  "findings": [
+    {
+      "id": "F1",
+      "gap_type": "missing",
+      "severity": "CRITICAL",
+      "source": "FR-003, Constitution I",
+      "evidence": "No money() currency() helpers in backend/src/models/base.py; T004 not created"
+    },
+    {
+      "id": "F2",
+      "gap_type": "missing",
+      "severity": "CRITICAL",
+      "source": "FR-002, FR-004",
+      "evidence": "No org scoping mixin or UUID organization_id in base model; shared foundation missing"
+    },
+    {
+      "id": "F3",
+      "gap_type": "missing",
+      "severity": "CRITICAL",
+      "source": "FR-005, FR-012",
+      "evidence": "No enum.StrEnum definitions; T005 not created"
+    },
+    {
+      "id": "F4",
+      "gap_type": "missing",
+      "severity": "HIGH",
+      "source": "FR-001, FR-004, FR-012, constitution Database & Schema",
+      "evidence": "No db.py with engine/session config; T006 not created"
+    },
+    {
+      "id": "F5",
+      "gap_type": "missing",
+      "severity": "HIGH",
+      "source": "FR-014, FR-015, SC-005, SC-006, SC-007",
+      "evidence": "No Alembic scaffolding; T007 not created"
+    },
+    {
+      "id": "F6",
+      "gap_type": "missing",
+      "severity": "HIGH",
+      "source": "US1, FR-001, FR-002, FR-004",
+      "evidence": "No org/property/room/tenancy/tenant/sender_alias models; T010 not created"
+    },
+    {
+      "id": "F7",
+      "gap_type": "missing",
+      "severity": "HIGH",
+      "source": "US1, FR-001, FR-002, FR-004",
+      "evidence": "No tenancy, tenant, sender_alias models; T011 not created"
+    },
+    {
+      "id": "F8",
+      "gap_type": "missing",
+      "severity": "HIGH",
+      "source": "US1, FR-001, FR-002, FR-004",
+      "evidence": "No admin_user, tenant_access_credential, tenant_session models; T012 not created"
+    }
+  ],
+  "summary": {
+    "requirements_checked": 8,
+    "plan_decisions_checked": 10,
+    "constitution_principles_checked": 6,
+    "findings_by_gap_type": {
+      "missing": 8,
+      "partial": 0,
+      "contradicts": 0,
+      "unrequested": 0
+    },
+    "findings_by_severity": {
+      "CRITICAL": 3,
+      "HIGH": 5,
+      "MEDIUM": 0,
+      "LOW": 0
+    }
+  }
+}

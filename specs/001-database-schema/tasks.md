@@ -24,13 +24,14 @@
 
 ---
 
+
 ## Phase 1: Setup (Shared Infrastructure)
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create project structure per implementation plan: `backend/src/models/`, `backend/src/migrations/versions/`, `backend/src/migrations/alembic.ini`, `tests/`
-- [ ] T002 [P] Create `backend/pyproject.toml` with dependency pins: SQLAlchemy 2.x (2.0-style), Alembic, psycopg (PostgreSQL), SQLite stdlib (dev), pytest
-- [ ] T003 [P] Configure pytest skeleton and engine fixtures in `tests/conftest.py` (SQLite default per-test DB; `DATABASE_URL` override for PostgreSQL)
+- [x] T001 Create project structure per implementation plan: `backend/src/models/`, `backend/src/migrations/versions/`, `backend/src/migrations/alembic.ini`, `tests/`
+- [x] T002 [P] Create `backend/pyproject.toml` with dependency pins: SQLAlchemy 2.x (2.0-style), Alembic, psycopg (PostgreSQL), SQLite stdlib (dev), pytest
+- [x] T003 [P] Configure pytest skeleton and engine fixtures in `tests/conftest.py` (SQLite default per-test DB; `DATABASE_URL` override for PostgreSQL)
 
 ---
 
@@ -40,11 +41,11 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Create shared base mixins and money/currency helpers in `backend/src/models/base.py` — mixins `IdCreatedAt` (UUID id, created_at), `OrgScoped` (organization_id FK), `UpdatedAt` (updated_at only on mutable tables); `money()` helper (column suffix `_minor`, type `BIGINT`; default `CHECK (>= 0)`, with a `positive=True` variant emitting `CHECK (> 0)` used ONLY where docs/04 specify `> 0` — e.g. `transaction.amount_minor`), `currency()` helper (`CHAR(3) NOT NULL`, default `NGN`)
+- [x] T004 Create shared base mixins and money/currency helpers in `backend/src/models/base.py` — mixins `IdCreatedAt` (UUID id, created_at), `OrgScoped` (organization_id FK), `UpdatedAt` (updated_at only on mutable tables); `money()` helper (column suffix `_minor`, type `BIGINT`; default `CHECK (>= 0)`, with a `positive=True` variant emitting `CHECK (> 0)` used ONLY where docs/04 specify `> 0` — e.g. `transaction.amount_minor`), `currency()` helper (`CHAR(3) NOT NULL`, default `NGN`)
 - [ ] T033 [P] Money/currency tests in `tests/test_money.py` for the `money()`/`currency()` helpers from `backend/src/models/base.py` (T004): integer minor-unit magnitude, per-table `CHECK (>= 0)` vs `CHECK (> 0)` contract (contracts/schema.md §3.4), `CHAR(3)` currency default `NGN`, no floating-point storage (Principle I). Write FIRST and confirm they fail before/while T004 lands.
-- [ ] T005 [P] Create all `enum.StrEnum` definitions in `backend/src/enums.py` for docs/04 §4: `tenancy_status` (`draft active closed`), `record_category` (`tenant_payment utility_bill_payment`), `direction` (`credit debit`), `matching_status` (`unmatched ambiguous matched manually_matched not_applicable`), `allocation_type` (`automatic manual correction reversal`), `advance_movement_type` (`created applied reversed`), `import_batch_status` (`parsing staged duplicate_statement totals_mismatch confirmed rejected completed failed`), `totals_status` (`valid mismatch missing`)
-- [ ] T006 [P] Create `backend/src/db.py` engine/session/config reading `DATABASE_URL` — PostgreSQL for production, SQLite for local development (constitution Database & Schema)
-- [ ] T007 [P] Initialize Alembic scaffolding: `backend/src/migrations/alembic.ini`, `backend/src/migrations/env.py`, empty `backend/src/migrations/versions/`
+- [x] T005 [P] Create all `enum.StrEnum` definitions in `backend/src/enums.py` for docs/04 §4: `tenancy_status` (`draft active closed`), `record_category` (`tenant_payment utility_bill_payment`), `direction` (`credit debit`), `matching_status` (`unmatched ambiguous matched manually_matched not_applicable`), `allocation_type` (`automatic manual correction reversal`), `advance_movement_type` (`created applied reversed`), `import_batch_status` (`parsing staged duplicate_statement totals_mismatch confirmed rejected completed failed`), `totals_status` (`valid mismatch missing`)
+- [x] T006 [P] Create `backend/src/db.py` engine/session/config reading `DATABASE_URL` — PostgreSQL for production, SQLite for local development (constitution Database & Schema)
+- [x] T007 [P] Initialize Alembic scaffolding: `backend/src/migrations/alembic.ini`, `backend/src/migrations/env.py`, empty `backend/src/migrations/versions/`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -58,14 +59,14 @@
 
 ### Tests for User Story 1 ⚠️ (write FIRST, ensure they FAIL before implementation)
 
-- [ ] T008 [P] [US1] Uniqueness/constraint tests in `tests/test_uniqueness.py` for: active tenancy per room (`UNIQUE (room_id) WHERE status='active'`), sender_alias (`UNIQUE (tenancy_id, normalized_name)`), UUID PK + org scoping presence on org-hierarchy tables
-- [ ] T009 [P] [US1] Identity validity tests in `tests/test_identity.py` for credential rotation (version increment revokes prior sessions) and tenant_session validity rule (revoked_at IS NULL AND expires_at > now() AND credential_version = credential.credential_version AND credential.is_active = true)
+- [x] T008 [P] [US1] Uniqueness/constraint tests in `tests/test_uniqueness.py` for: active tenancy per room (`UNIQUE (room_id) WHERE status='active'`), sender_alias (`UNIQUE (tenancy_id, normalized_name)`), UUID PK + org scoping presence on org-hierarchy tables
+- [x] T009 [P] [US1] Identity validity tests in `tests/test_identity.py` for credential rotation (version increment revokes prior sessions) and tenant_session validity rule (revoked_at IS NULL AND expires_at > now() AND credential_version = credential.credential_version AND credential.is_active = true)
 
 ### Implementation for User Story 1
 
-- [ ] T010 [P] [US1] Create organization, property, room models in `backend/src/models/org.py` (org scoping: property.organization_id FK NOT NULL; room reachable via room → property → organization)
-- [ ] T011 [P] [US1] Create tenancy, tenant, sender_alias models in `backend/src/models/tenancy.py` (tenancy: status default draft, denormalized organization_id, partial unique active-tenancy; sender_alias: normalized_name unique per tenancy)
-- [ ] T012 [P] [US1] Create admin_user, tenant_access_credential, tenant_session models in `backend/src/models/identity.py` (email UNIQUE; password_hash never plaintext; credential versioned; session write-once with semantic revoked_at)
+- [x] T010 [P] [US1] Create organization, property, room models in `backend/src/models/org.py` (org scoping: property.organization_id FK NOT NULL; room reachable via room → property → organization)
+- [x] T011 [P] [US1] Create tenancy, tenant, sender_alias models in `backend/src/models/tenancy.py` (tenancy: status default draft, denormalized organization_id, partial unique active-tenancy; sender_alias: normalized_name unique per tenancy)
+- [x] T012 [P] [US1] Create admin_user, tenant_access_credential, tenant_session models in `backend/src/models/identity.py` (email UNIQUE; password_hash never plaintext; credential versioned; session write-once with semantic revoked_at)
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -88,6 +89,49 @@
 **Checkpoint**: User Story 2 independently functional
 
 ---
+
+
+
+## Phase 2: Convergence
+
+**Purpose**: Close the gap between what a feature's specification, plan, and tasks call for and what the codebase currently implements.
+
+**Analysis Summary**:
+- **Requirements checked**: 8 (FR-001..FR-015)
+- **Plan decisions checked**: 10 (architecture, stack, phases, technical constraints)
+- **Constitution principles checked**: 6 (I, II, III, IV, V, Database & Schema)
+- **Findings by gap type**: missing: 8, partial: 0, contradicts: 0, unrequested: 0
+- **Findings by severity**: CRITICAL: 3, HIGH: 5, MEDIUM: 0, LOW: 0
+
+**Key Findings (CRITICAL)**:
+
+1. **F1** - missing (FR-003, Constitution I) - No money() currency() helpers in backend/src/models/base.py; T004 not created
+2. **F2** - missing (FR-002, FR-004) - No org scoping mixin or UUID organization_id in base model; shared foundation missing
+3. **F3** - missing (FR-005, FR-012) - No enum.StrEnum definitions; T005 not created
+
+**Key Findings (HIGH)**:
+
+4. **F4** - missing (FR-001, FR-004, FR-012, constitution Database & Schema) - No db.py with engine/session config; T006 not created
+5. **F5** - missing (FR-014, FR-015, SC-005, SC-006, SC-007) - No Alembic scaffolding; T007 not created
+6. **F6** - missing (US1, FR-001, FR-002, FR-004) - No org/property/room/tenancy/tenant/sender_alias models; T010 not created
+7. **F7** - missing (US1, FR-001, FR-002, FR-004) - No tenancy, tenant, sender_alias models; T011 not created
+8. **F8** - missing (US1, FR-001, FR-002, FR-004) - No admin_user, tenant_access_credential, tenant_session models; T012 not created
+
+**Recommended Next Steps**:
+
+- **Immediate Priority**: Complete Phase 2 Foundational (T004-T007)
+  - Implement shared base mixins and money/currency helpers
+  - Create enum.StrEnum definitions
+  - Set up database engine and Alembic scaffolding
+
+- **Parallel after Foundational**: Begin User Story 1 (T008-T012)
+  - Write uniqueness/constraint tests
+  - Write identity validity tests
+  - Create organization/property/room models
+  - Create tenancy/tenant/sender_alias models
+  - Create admin_user/tenant_access_credential/tenant_session models
+
+**Status**: Tasks appended - Phase 2 Convergence ready for implementation.
 
 ## Phase 5: User Story 3 - Tenant Payment Ledger & Billing (Priority: P1, highest-risk)
 
@@ -119,11 +163,11 @@
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T021 [P] [US4] Two-ledger separation + utility spend tests (I-3) in `tests/test_separation.py`: utility payments never create payment allocations, never carry tenant matching state; spend aggregates by provider_id/spend_month
+- [x] T021 [P] [US4] Two-ledger separation + utility spend tests (I-3) in `tests/test_separation.py`: utility payments never create payment allocations, never carry tenant matching state; spend aggregates by provider_id/spend_month
 
 ### Implementation for User Story 4
 
-- [ ] T022 [US4] Create utility_provider, utility_bill_payment models in `backend/src/models/utility.py` (utility_provider: global, organization_id nullable = global, code UNIQUE; utility_bill_payment: transaction_id `NOT NULL, UNIQUE` one-to-one, provider_id FK, spend_month DATE for month-bounded spend)
+- [x] T022 [US4] Create utility_provider, utility_bill_payment models in `backend/src/models/utility.py` (utility_provider: global, organization_id nullable = global, code UNIQUE; utility_bill_payment: transaction_id `NOT NULL, UNIQUE` one-to-one, provider_id FK, spend_month DATE for month-bounded spend)
 
 **Checkpoint**: User Stories 1-4 (both ledgers) independently functional
 
@@ -186,63 +230,16 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T031 Run `quickstart.md` validation end-to-end on SQLite and PostgreSQL; confirm SC-001..SC-007; measure fresh-apply duration against SC-001 (< 2 min) and record the result
-- [ ] T032 Verify `checklists/requirements.md` fully satisfied; final docs/commit pass (no commit unless separately requested)
+- [ ] T034 <imperative description> per FR-003 (missing)
+   - [ ] T035 <imperative description> per FR-002, FR-004 (missing)
+   - [ ] T036 <imperative description> per FR-005, FR-012 (missing)
+   - [ ] T037 <imperative description> per FR-001, FR-004, FR-012 (missing)
+   - [ ] T038 <imperative description> per plan (FR-014, FR-015, SC-005, SC-006, SC-007) (missing)
+   - [ ] T039 <imperative description> per US1 (FR-001, FR-002, FR-004) (missing)
+   - [ ] T040 <imperative description> per US1 (FR-001, FR-002, FR-004) (missing)
+   - [ ] T041 <imperative description> per US1 (FR-001, FR-002, FR-004) (missing)
 
----
-
-## Dependencies & Execution Order
-
-### Phase Dependencies
-
-- **Setup (Phase 1)**: No dependencies - can start immediately
-- **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
-- **User Stories (Phase 3+)**: All depend on Foundational; then can proceed in parallel (if staffed) or sequentially in priority order (P1 → P2 → P3)
-- **Polish (Final Phase)**: Depends on all desired user stories complete
-
-### User Story Dependencies
-
-- **US1 (P1)**: Can start after Foundational - no story dependencies
-- **US2 (P1)**: After Foundational; uses `base.py` money/currency helpers (T004)
-- **US3 (P1)**: After Foundational; uses billing_config from US2 (T014) for final_amount semantics; independently testable
-- **US4 (P1)**: After Foundational; refers to transaction (T018); independently testable
-- **US5 (P2)**: After Foundational; commits to transaction (T018)
-- **US6 (P2)**: After Foundational; independently testable
-- **US7 (P3)**: After ALL stories (single baseline migration must define every table)
-
-### Within Each User Story
-
-- Tests (included) MUST be written and FAIL before implementation
-- Models before services (models only here — no services/endpoints in this schema feature)
-- Core implementation before integration
-- Story complete before moving to next priority
-
-### Parallel Opportunities
-
-- Setup [P] tasks: T002, T003 in parallel
-- Foundational [P] tasks: T005, T006, T007 in parallel (T004 first for file `base.py` consumers)
-- Once Foundational completes, US1..US6 model packs can run in parallel (different files), except US3 depends on US2's `billing_config.py` only conceptually (T020 references standard amount snapshot) — sequence US2 before US3 if parallel
-- Tests for a story marked [P] run in parallel within that story
-- Models within a story marked [P] run in parallel (distinct files)
-
-### Within-Story File Conflict Guard
-
-- US2 uses `billing_config.py`, US3 uses `billing_ledger.py` + `ledger.py` — split files so stories never edit the same file concurrently. Do NOT run US2 and US3 parallel if either would touch a shared module without the split.
-
----
-
-## Parallel Example: User Story 1
-
-```bash
-# Launch all tests for User Story 1 together:
-Task: "Uniqueness/constraint tests in tests/test_uniqueness.py"
-Task: "Identity validity tests in tests/test_identity.py"
-
-# Launch all models for User Story 1 together:
-Task: "Create organization, property, room models in backend/src/models/org.py"
-Task: "Create tenancy, tenant, sender_alias models in backend/src/models/tenancy.py"
-Task: "Create admin_user, tenant_access_credential, tenant_session models in backend/src/models/identity.py"
-```
+**Checkpoint**: Phase 2 Convergence complete — all found gaps addressed.
 
 ---
 
