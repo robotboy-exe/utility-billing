@@ -1,21 +1,23 @@
-# ADR-003 — Deployment-Model Independence
+# ADR-003 — Deployment-Model Independence (revised)
 
-**Status:** Accepted
+**Status:** Accepted (revised)
 
 ## Context
 
-The application may be deployed as centralized multi-tenant SaaS, a dedicated
-deployment for a single customer, or a standalone/self-hosted installation. Core
-business rules must behave identically across these models.
+The earlier framing assumed three first-class deployment models — multi-tenant SaaS,
+dedicated, and standalone — with a rule that core business rules behave identically
+across them. The MVP is a single-organization product hosted on one provider
+(see ADR-002).
 
 ## Decision
 
-Business logic must not depend on whether the application is deployed as SaaS,
-dedicated, or standalone.
+Business logic must not depend on the hosting provider or runtime. Hosting differences
+are configuration (database URL, secrets, limits), not domain code. The earlier rule
+that no behavior may differ by deployment mode is dropped.
 
 ## Consequences
 
-No core business rule may assume one organization, one property, one deployment,
-SaaS-only operation, or self-hosted-only operation.
-Deployment configuration determines how the application is hosted, while domain
-logic remains unchanged.
+- No core business rule may assume a particular host.
+- Capabilities that exist only in a future multi-organization SaaS (onboarding,
+  subscription billing) are outside billing logic and do not affect billing rules
+  (see ADR-002).
