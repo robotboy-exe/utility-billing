@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.5.0`
+Version: `0.5.1`
 Status: Draft — design phase, no implementation yet
 Last Updated: 2026-10-03
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Added `organization.timezone TEXT NOT NULL DEFAULT 'Africa/Lagos'` so calendar-month boundaries (`billing_month`, "current month", utility spend grouping) are computed in the organization's business timezone while instants stay UTC (ADR-028). Added the operational, prunable `tenant_login_attempt` table with `(tenancy_id, attempted_at)` and `(source_ip, attempted_at)` indexes; rate limiting is stored in the database (free hosts restart; process memory is not reliable). Clarified that tenant access code hashes are not unique across tenancies (verification is by tenancy plus code) and that `tenant_session.expires_at` is fixed at issuance and never extended on use (5 failures/15 min, 15-min lockout, 30-day sessions, 8-character codes are application configuration, not schema). Removed the persisted statement-footer control totals from `import_batch` (`totals_credit_minor`, `totals_debit_minor`); footer totals are compared in memory and discarded, keeping only `totals_status` (ADR-019). Added `source_file_sha256` (CHAR(64)), `source_filename` and `source_page_count` to `import_batch`; the PDF itself is not retained (ADR-012, ADR-019). Restricted `import_profile.source_type` to `pdf` only — CSV/XLSX are out of the MVP. Set the documented default of `portal_setting.allow_other_room_amount_due` to `false`: other rooms see property aggregates by default, and per-room amount/status is admin opt-in per organization or property.
+Changes in this version: Terminology consistency fix (PATCH): `tenant_login_attempt` rows are written once and may be pruned (Section 11.6), so the table is described as write-once, prunable operational data rather than append-only — it remains not a financial table and not part of immutable financial history.
 
 ---
 
@@ -1051,7 +1051,7 @@ These may be updated normally:
 - tenant_access_credential (rotation)
 - admin_user
 
-This list equals exactly the tables carrying `updated_at`. Three write-once operational tables are excluded: `tenant_session`, `staged_import_row`, and `tenant_login_attempt`. `tenant_session` and `staged_import_row` are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits; `tenant_login_attempt` is append-only operational data for rate limiting. All three are governed by Sections 11.3, 11.4 and 11.6. `tenant_login_attempt` is operational, prunable data; it is not a financial table and is not part of immutable financial history.
+This list equals exactly the tables carrying `updated_at`. Three write-once operational tables are excluded: `tenant_session`, `staged_import_row`, and `tenant_login_attempt`. `tenant_session` and `staged_import_row` are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits; `tenant_login_attempt` is write-once, prunable operational data for rate limiting. All three are governed by Sections 11.3, 11.4 and 11.6. `tenant_login_attempt` is operational, prunable data; it is not a financial table and is not part of immutable financial history.
 
 ### 11.3 Staged row retention
 

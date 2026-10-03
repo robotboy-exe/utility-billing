@@ -8,7 +8,7 @@
 
 **Immutable (append-only, `created_at` only)**: `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`.
 **Mutable (`updated_at`)**: `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `monthly_bill`, `billing_config`, `billing_override`, `portal_setting`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `utility_provider`, `tenant_access_credential`, `admin_user`.
-**Write-once operational (no `updated_at`; closed via semantic field or append-only)**: `tenant_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`), `tenant_login_attempt` (append-only rate-limiting history, prunable).
+**Write-once operational (no `updated_at`; closed via semantic field or write-once, prunable)**: `tenant_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`), `tenant_login_attempt` (write-once, prunable rate-limiting history).
 
 ---
 
