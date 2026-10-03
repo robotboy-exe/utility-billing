@@ -1,14 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.3.2`
+Version: `0.4.0`
 Status: Draft — accepted MVP billing rules
-Last Updated: 2026-09-17  
+Last Updated: 2026-10-03  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Scoped the advance movement ledger's `reversed` type to undoing a `created` movement only. Restoring advance after an allocation is reversed is recorded as a new `created` movement, never as `reversed`, keeping the created-minus-applied-minus-reversed reconciliation invariant sound.
-
-Previous version (0.2.0): Added the append-only advance movement ledger and its reconciliation invariant for fraud auditability. The advance balance remains derived.
+Changes in this version: Lazy bill generation is named `ensure_bills_through(organization_id, month)` with the ADR-022 caller list — admin dashboard load, payment allocation, import batch confirm, admin report requests; tenant-session requests, including the tenant portal, are not callers — and the month computed in the organization timezone (ADR-028); the payment allocation section gains the ADR-022 transaction and locking order; the engine's independence is stated against any statement parser rather than specific CSV/XLSX formats.
 
 ---
 
@@ -55,8 +53,7 @@ The billing engine operates on:
 The billing engine does not depend on:
 
 - PDF parsing.
-- CSV parsing.
-- XLSX parsing.
+- Any statement parser.
 - Payvice Avantus-specific statement rules.
 - Frontend implementation.
 - API implementation.
@@ -263,7 +260,9 @@ In normal operation, the engine should apply advance credit to existing outstand
 
 ### 5.1 Bill generation
 
-Bills are generated **automatically and rolling** (lazy generation), the first time the system needs them (dashboard load, payment processing, or report request).
+Bills are generated **automatically and rolling** (lazy generation) by one function, `ensure_bills_through(organization_id, month)`, with no background scheduler. Callers: admin dashboard load, payment allocation, import batch confirm, admin report requests. Tenant-session requests, including the tenant portal, are not callers.
+
+The month is computed in the organization's business timezone (ADR-028).
 
 For that month:
 - Each active tenancy receives one bill.
@@ -492,6 +491,12 @@ Payment history should show:
 
 - Received month: July.
 - Allocated month: June.
+
+---
+
+### 6.9 Transaction and locking order
+
+Allocation and batch confirm run in one database transaction. Within it: call `ensure_bills_through(organization_id, month)`; on confirm, lock the `import_batch` row and re-check its status; lock tenancies in ascending id order; lock open bills `FOR UPDATE` ordered by month; write allocations and advance movements before commit (ADR-022).
 
 ---
 

@@ -1,12 +1,12 @@
 # Transaction Ingestion
 
 Document: `docs/06-transaction-ingestion.md`  
-Version: `0.2.1`  
+Version: `0.3.0`  
 Status: Draft — accepted MVP ingestion design  
-Last Updated: 2026-09-17  
+Last Updated: 2026-10-03  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`
 
-Changes in this version: Added `04-database.md` to the related documents and refreshed the metadata. No ingestion rules changed.
+Changes in this version: CSV/XLSX statement import moved from a future profile to explicitly out of the MVP; payment webhooks refer to ADR-006; a totals mismatch or a missing footer now blocks confirmation of the batch, and only `totals_status` is persisted (04 0.5.1); the transient commission recognition during totals validation no longer has a disable-validation alternative; `source_file_sha256` is stored alongside the content-based statement fingerprint; the `import_batch` metadata list is aligned with 04 0.5.1 (`source_filename`, `source_page_count`); statement timestamps are interpreted in the organization timezone (ADR-028); PDF-retention wording closed (no "by default" — ADR-019).
 
 ---
 
@@ -50,23 +50,21 @@ This source is mandatory.
 
 ### 2.2 Secondary sources
 
-The following remain desirable but secondary:
+The following is secondary but remains in the MVP:
 
-- CSV statement import.
-- XLSX statement import.
 - Manual transaction entry.
-
-CSV and XLSX profiles may be added later using the same import-profile abstraction.
 
 ---
 
 ### 2.3 Deferred sources
 
-The following are deferred:
+The following are deferred — explicitly out of the MVP:
 
 - Google Sheets.
-- Paystack webhooks.
-- Monnify webhooks.
+- CSV statement import.
+- XLSX statement import.
+- Paystack webhooks (ADR-006).
+- Monnify webhooks (ADR-006).
 - Direct bank APIs.
 - OCR/scanned-image PDF parsing.
 
@@ -112,7 +110,7 @@ Staging allows:
 
 ### 3.3 File retention
 
-The original PDF binary is not retained by default.
+The original PDF binary is not retained.
 
 The system stores:
 
@@ -363,6 +361,8 @@ Validation:
 
 - The transaction date must fall within the statement period.
 - Dates outside the statement period are flagged.
+
+Statement timestamps are interpreted in the organization's business timezone (ADR-028).
 
 ---
 
@@ -661,8 +661,6 @@ To preserve statement validation, the parser may transiently recognize commissio
 
 No commission data may be retained after parsing.
 
-If this transient validation is ever considered unacceptable, the alternative is to disable credit-total validation for this profile.
-
 ---
 
 ## 13. Tenant Payment Ingestion
@@ -863,9 +861,9 @@ The key is stored as a deterministic hash.
 
 ---
 
-### 18.2 Statement fingerprint
+### 18.2 Statement fingerprint and file hash
 
-The import batch should also compute a statement fingerprint from:
+The import batch stores a content-based statement fingerprint computed from:
 
 ```text
 statement account
@@ -873,7 +871,7 @@ statement period
 ordered persistable row duplicate keys
 ```
 
-This fingerprint detects re-importing the same statement.
+This fingerprint detects re-importing the same statement. Alongside it, the batch stores `source_file_sha256`, the SHA-256 of the presented file, so a re-presented file can be recognized as the same file that was imported. The content-based fingerprint stays; the file hash does not replace it.
 
 ---
 
@@ -922,6 +920,8 @@ Because commission rows are excluded from storage but included in the statement 
 
 No commission data is retained.
 
+The footer credit and debit totals themselves are not persisted; only `totals_status` is stored on the import batch (04 0.5.1).
+
 ### 20.1 Totals match
 
 If totals match:
@@ -940,9 +940,7 @@ If totals do not match:
 totals_status = mismatch
 ```
 
-The staged import is flagged for admin review.
-
-A mismatch does not automatically mean the import must be rejected, but it must not be silently ignored.
+The mismatch blocks confirmation of the batch; it is not merely flagged for admin review.
 
 ---
 
@@ -954,7 +952,7 @@ If no total line is found:
 totals_status = missing
 ```
 
-The import should be flagged.
+The missing footer also blocks confirmation of the batch; it is not merely flagged.
 
 ---
 
@@ -972,7 +970,10 @@ The batch stores:
 - Statement start date.
 - Statement end date.
 - Upload timestamp.
-- Totals validation status.
+- File SHA-256 (`source_file_sha256`).
+- Original file name (`source_filename`).
+- Page count (`source_page_count`).
+- Totals validation status (`totals_status`).
 - Duplicate statement status.
 - Import status.
 
@@ -1146,7 +1147,7 @@ The following rules are locked for MVP:
 1. Payvice Avantus PDF is the primary transaction source.
 2. The format is text-based PDF; OCR is not supported.
 3. Imports are staged and confirmed by admin.
-4. Original PDF binaries are not retained by default.
+4. Original PDF binaries are not retained.
 5. `FUNDING` credits become tenant payments.
 6. `BEDC` debits become utility bill payments.
 7. Utility bill payments populate month-bounded provider spend reporting.
