@@ -18,6 +18,7 @@ that no behavior may differ by deployment mode is dropped.
 ## Consequences
 
 - No core business rule may assume a particular host.
+- No core business rule may assume a single property.
 - Capabilities that exist only in a future multi-organization SaaS (onboarding,
   subscription billing) are outside billing logic and do not affect billing rules
   (see ADR-002).

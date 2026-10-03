@@ -1,10 +1,10 @@
 # ADR-010 — Rate-Change Adjustments and Write-Offs (revised)
 
-**Status:** Accepted (replaces the earlier per-bill-adjustment form)
+**Status:** Accepted (revised)
 
 ## Context
 
-Arbitrary per-room bill overrides are fraud-prone and are removed. Adjustments must still be possible for legitimate reasons and must stay transparent.
+Arbitrary per-room bill overrides are fraud-prone and are removed. Adjustments must still be possible for legitimate reasons and must stay transparent. This replaces the earlier per-bill-adjustment form.
 
 ## Decision
 
