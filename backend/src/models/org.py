@@ -17,12 +17,24 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import Mapped, validates
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .base import IdCreatedAtMixin, OrgScopedMixin, UpdatedAtMixin
 
 if TYPE_CHECKING:
     from .tenancy import Tenancy
+
+DEFAULT_ORG_TIMEZONE = "Africa/Lagos"
+
+
+def is_valid_iana_timezone(name: str) -> bool:
+    """Return True if `name` is a real IANA timezone (e.g. Africa/Lagos)."""
+    try:
+        ZoneInfo(name)
+        return True
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
 
 
 class Organization(IdCreatedAtMixin):
@@ -31,6 +43,12 @@ class Organization(IdCreatedAtMixin):
     __tablename__ = "organization"
 
     name: Mapped[str] = sa.Column(sa.String, nullable=False)
+    timezone: Mapped[str] = sa.Column(
+        sa.String,
+        nullable=False,
+        default=DEFAULT_ORG_TIMEZONE,
+        server_default="'Africa/Lagos'",
+    )
     # Additional org-specific fields can be added here as needed
 
     # Relationship to properties
@@ -38,8 +56,14 @@ class Organization(IdCreatedAtMixin):
         "Property", back_populates="organization"
     )
 
+    @validates("timezone")
+    def _validate_timezone(self, key: str, value: str) -> str:
+        if not value or not isinstance(value, str) or not is_valid_iana_timezone(value):
+            raise ValueError(f"invalid IANA timezone: {value!r}")
+        return value
+
     def __repr__(self) -> str:
-        return f"Organization(id={self.id}, name={self.name})"
+        return f"Organization(id={self.id}, name={self.name}, timezone={self.timezone})"
 
 
 class Property(IdCreatedAtMixin, OrgScopedMixin):

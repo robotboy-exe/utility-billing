@@ -4,9 +4,11 @@ This module defines the identity.py models required for User Story 1:
 - admin_user
 - tenant_access_credential
 - tenant_session
+- tenant_login_attempt
 
 These models provide the identity and authentication foundation for the system,
-including credential rotation and session validity rules.
+including credential rotation, session validity rules, and database-backed
+login-attempt rate limiting.
 """
 
 import uuid
@@ -20,6 +22,7 @@ from sqlalchemy.orm import Mapped
 from .base import IdCreatedAtMixin, OrgScopedMixin, UpdatedAtMixin
 
 if TYPE_CHECKING:
+    from .org import Organization
     from .tenancy import Tenancy
 
 
@@ -160,13 +163,69 @@ class TenantSession(IdCreatedAtMixin):
         2. Not expired (expires_at > now())
         3. Credential version matches (credential_version = credential.credential_version)
         4. Credential is active (credential.is_active = true)
+
+        Timestamps reloaded from SQLite arrive naive; they are treated as UTC so
+        the comparison never mixes naive and aware datetimes.
         """
+        expires = self.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
         return (
             self.revoked_at is None
-            and self.expires_at > datetime.now(timezone.utc)
+            and expires > datetime.now(timezone.utc)
             and self.credential_version == self.credential.credential_version
             and self.credential.is_active is True
         )
 
     def __repr__(self) -> str:
         return f"TenantSession(id={self.id}, credential={self.credential_id}, valid={self.is_valid})"
+
+
+class TenantLoginAttempt(IdCreatedAtMixin, OrgScopedMixin):
+    """
+    Operational rate-limiting history for tenant access-code attempts.
+
+    Fields:
+    - id
+    - organization_id: FK→organization NOT NULL (org-scoped)
+    - tenancy_id: FK→tenancy nullable (null when the room is unknown)
+    - source_ip: TEXT client IP
+    - attempted_at: timestamptz, UTC
+    - succeeded: bool
+    - created_at
+
+    Notes:
+    - Write-once operational data, prunable; never part of financial history.
+    - Thresholds are application configuration, not schema.
+    """
+
+    __tablename__ = "tenant_login_attempt"
+
+    tenancy_id: Mapped[uuid.UUID] = sa.Column(
+        sa.UUID(as_uuid=True),
+        sa.ForeignKey("tenancy.id"),
+        nullable=True,
+    )
+
+    source_ip: Mapped[str] = sa.Column(sa.Text, nullable=True)
+    attempted_at: Mapped[datetime] = sa.Column(sa.DateTime(timezone=True), nullable=False)
+    succeeded: Mapped[bool] = sa.Column(sa.Boolean, nullable=False)
+
+    __table_args__ = (
+        sa.Index("ix_tenant_login_attempt_tenancy_id_attempted_at", "tenancy_id", "attempted_at"),
+        sa.Index("ix_tenant_login_attempt_source_ip_attempted_at", "source_ip", "attempted_at"),
+    )
+
+    # Relationships
+    organization: Mapped["Organization"] = sa.orm.relationship(
+        "Organization", backref="tenant_login_attempts"
+    )
+    tenancy: Mapped["Tenancy"] = sa.orm.relationship(
+        "Tenancy", backref="tenant_login_attempts"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"TenantLoginAttempt(id={self.id}, tenancy={self.tenancy_id}, "
+            f"succeeded={self.succeeded})"
+        )
