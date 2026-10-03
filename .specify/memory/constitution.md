@@ -91,7 +91,7 @@ money handling are unacceptable (ADR-014; testing focus in 03 §15, 05 §16, 06 
   the selected room's tenancy. Failed attempts MUST be rate-limited with
   database-backed counters, not in-memory state. Tenant sessions MUST expire at
   a fixed time set at issuance (ADR-009).
-- Original statement PDF binaries MUST NOT be retained by default; export
+- Original statement PDF binaries MUST NOT be retained; export
   functionality is the backup strategy.
 
 ## Governance
@@ -114,4 +114,4 @@ principles above.
   project owner. This is a solo project; there is no approval body distinct from
   ADR acceptance authority.
 
-**Version**: 1.2.0 | **Ratified**: 2026-09-16 | **Last Amended**: 2026-10-03
+**Version**: 1.2.1 | **Ratified**: 2026-09-16 | **Last Amended**: 2026-10-03

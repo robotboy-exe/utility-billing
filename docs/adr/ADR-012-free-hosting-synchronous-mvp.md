@@ -29,5 +29,5 @@ Admin-triggered synchronous operations are used for:
 
 - The system must tolerate cold starts.
 - Imports must be small enough to process synchronously.
-- Original statement files are not retained by default.
+- Original statement files are not retained.
 - Export functionality is used as a backup strategy.

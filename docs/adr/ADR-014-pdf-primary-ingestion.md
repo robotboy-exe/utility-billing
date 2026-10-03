@@ -15,5 +15,5 @@ PDF import is a must-have MVP feature and the primary transaction source. It is 
 - The Transaction Ingestion module carries real parser complexity and needs strong test coverage.
 - Sample PDFs from the billing software are on the critical path for design and testing.
 - Free-tier CPU/memory limits shape parser library choice and upload limits.
-- Committed transaction rows are retained for audit; PDF binaries are not retained by default, and staged rows may be pruned after commit.
+- Committed transaction rows are retained for audit; PDF binaries are not retained, and staged rows may be pruned after commit.
 - Scanned PDFs require manual entry or a future OCR decision.
