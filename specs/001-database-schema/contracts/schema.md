@@ -47,7 +47,8 @@ Each implemented as a Python `enum.StrEnum`; DB enforcement via `CHECK` (R-1).
 | Table | Constraint | Contract |
 |---|---|---|
 | admin_user | `email` UNIQUE | One login identity |
-| tenant_access_credential | `tenancy_id` UNIQUE | One credential per tenancy |
+| tenant_access_credential | `tenancy_id` UNIQUE | One credential per tenancy; the hash itself is NOT unique — codes are verified by tenancy + code, never globally |
+| tenant_login_attempt | indexes `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)` | Operational rate-limiting history; prunable, never financial |
 | sender_alias | `(tenancy_id, normalized_name)` UNIQUE | No duplicate normalized sender |
 | billing_override | `(tenancy_id, billing_month)` UNIQUE | One bill/skip decision per tenancy-month |
 | monthly_bill | `(tenancy_id, billing_month)` UNIQUE | One bill per tenancy per month (I-6) |
@@ -55,7 +56,7 @@ Each implemented as a Python `enum.StrEnum`; DB enforcement via `CHECK` (R-1).
 | transaction | `CHECK record_category IN (...)` | Commissions never stored (I-4) |
 | utility_bill_payment | `transaction_id` UNIQUE | One provider-payment per source tx |
 | import_channel_category_mapping | `UNIQUE (import_profile_id, channel, COALESCE(direction,'ANY'))`; `CHECK category IN (...)` | Mapping is a config, not code |
-| import_batch | `CHECK`/app-layer `totals_status` | Control-total validation |
+| import_batch | `CHECK`/app-layer `totals_status` | Control-total validation: footer totals (incl. commissions) compared in memory and discarded; only `totals_status` persisted; `source_file_sha256` detects re-presented files |
 | staged_import_row | `CHECK row_category IN ('tenant_payment','utility_bill_payment')` | Only persistable categories staged |
 | portal_setting | `(scope_type, scope_id, setting_key)` UNIQUE; `CHECK scope_type IN (...)` | Scoped config |
 | billing_config | `standard_amount_minor CHECK >= 0` (+ all money where doc says `>= 0`); `amount_minor CHECK > 0` where doc says `> 0` | Money magnitude rules (3.4) |

@@ -10,6 +10,8 @@
 
 Implement the complete database layer for the Utility Billing MVP as SQLAlchemy models plus a single reversible Alembic baseline migration and idempotent seed, satisfying every entity, constraint, index, enum, derived-state computation, and immutability rule in `docs/04-database.md`. PostgreSQL is the production engine (native partial unique indexes and immutable-table triggers live here); SQLite is the local/dev/test engine. Technical decisions are captured in [research.md](research.md); the data model in [data-model.md](data-model.md); the DB contract in [contracts/schema.md](contracts/schema.md); runnable validation in [quickstart.md](quickstart.md).
 
+**Delta (04→0.5.0, 2026-10-03)**: organization gains an IANA `timezone` (default `Africa/Lagos`, month boundaries computed in it); new operational `tenant_login_attempt` table; tenant access code hashes are not globally unique; `tenant_session.expires_at` is fixed at issuance; `import_batch` no longer persists footer totals (in-memory comparison, `totals_status` only) and gains `source_file_sha256`/`source_filename`/`source_page_count`; `import_profile.source_type` is `pdf`-only; `portal_setting.allow_other_room_amount_due` defaults to `false`. In the current US1-only pass these ship as models + tests; the baseline migration (US7, T028) will include them.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -28,7 +30,7 @@ Implement the complete database layer for the Utility Billing MVP as SQLAlchemy 
 
 **Constraints**: Free hosting (no workers/schedulers); money as `BIGINT` minor units + `currency CHAR(3)` (no floats); append-only financial tables; org-scoped queries; PostgreSQL/SQLite parity except two documented divergences (R-4 partial indexes, R-5 immutable triggers)
 
-**Scale/Scope**: Single org MVP; 25 tables + seed
+**Scale/Scope**: Single org MVP; 26 tables + seed
 
 ## Constitution Check
 

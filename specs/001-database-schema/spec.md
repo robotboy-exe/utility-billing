@@ -14,18 +14,20 @@ This feature delivers the complete database layer — every entity, relationship
 
 ### User Story 1 - Structural & Identity Foundation (Priority: P1)
 
-A fresh deployment begins by establishing the structural and identity tables on which every financial record depends: organizations, properties, rooms, tenancies, tenants, sender aliases, admin users, tenant access credentials, and tenant sessions. An administrator must be able to set up the org hierarchy and authentication storage as the prerequisite to any financial record.
+A fresh deployment begins by establishing the structural and identity tables on which every financial record depends: organizations (including each organization's business timezone), properties, rooms, tenancies, tenants, sender aliases, admin users, tenant access credentials, tenant sessions, and tenant login attempts. An administrator must be able to set up the org hierarchy and authentication storage as the prerequisite to any financial record.
 
 **Why this priority**: No other module exists without this foundation. The org root (ADR-001) is the isolation boundary for all scoped queries, and every later slice is reachable through it.
 
-**Independent Test**: Can be fully tested by applying the schema and verifying the org/property/room/tenancy tables exist with UUID primary keys and org scoping, the single-active-tenancy-per-room rule holds, and the identity/auth tables (admin, access credential, session) enforce their integrity rules — delivering a usable org hierarchy with no financial records required.
+**Independent Test**: Can be fully tested by applying the schema and verifying the org/property/room/tenancy tables exist with UUID primary keys and org scoping, the single-active-tenancy-per-room rule holds, the identity/auth tables (admin, access credential, session) enforce their integrity rules, the organization timezone default and IANA validation apply, and tenant login attempts persist — delivering a usable org hierarchy with no financial records required.
 
 **Acceptance Scenarios**:
 
-1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `admin_user`, `tenant_access_credential`, and `tenant_session` all exist with UUID primary keys and `created_at` timestamps.
+1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `admin_user`, `tenant_access_credential`, `tenant_session`, and `tenant_login_attempt` all exist with UUID primary keys and `created_at` timestamps.
 2. **Given** one active tenancy for a room, **When** an administrator attempts to open a second active tenancy for the same room, **Then** the schema rejects it (partial unique index on active tenancy per room).
 3. **Given** a tenancy with a sender alias, **When** a duplicate normalized sender name is added for that tenancy, **Then** it is rejected by the `(tenancy_id, normalized_name)` uniqueness rule.
 4. **Given** an active access credential, **When** it is rotated, **Then** the stored version increments and previously issued sessions no longer satisfy the validity rule.
+5. **Given** a new organization, **When** it is persisted, **Then** `organization.timezone` defaults to `Africa/Lagos` and an invalid IANA name is rejected at the application layer (the database stores the given string).
+6. **Given** a tenant login attempt, **When** it is recorded, **Then** a `tenant_login_attempt` row persists with organization scoping, an optional tenancy (null when the room is unknown), the client IP, the UTC `attempted_at`, and the success flag; login-attempt history is operational and prunable, never financial.
 
 ---
 
@@ -138,7 +140,7 @@ The operational wrapper that makes the schema usable across environments: one re
 
 ### Functional Requirements
 
-- **FR-001**: System MUST persist every entity specified in `docs/04` §6 — `admin_user`, `tenant_access_credential`, `tenant_session`, `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `billing_config`, `billing_override`, `standard_amount_change`, `transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `utility_provider`, `utility_bill_payment`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `staged_import_row`, `portal_setting`, and `audit_log` — with the columns, types, and nullability in `docs/04` §6.
+- **FR-001**: System MUST persist every entity specified in `docs/04` §6 — `admin_user`, `tenant_access_credential`, `tenant_session`, `tenant_login_attempt`, `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `billing_config`, `billing_override`, `standard_amount_change`, `transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `utility_provider`, `utility_bill_payment`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `staged_import_row`, `portal_setting`, and `audit_log` — with the columns, types, and nullability in `docs/04` §6.
 - **FR-002**: System MUST use UUID primary keys on every table.
 - **FR-003**: System MUST store every monetary amount as an integer minor-unit (`BIGINT`) value with an explicit `currency CHAR(3)` column, with no floating-point storage, across all money-bearing tables (constitution Principle I).
 - **FR-004**: System MUST scope financial and structural queries by `organization_id` (and `property_id` / `tenancy_id` where relevant); key financial tables MUST carry `organization_id` (constitution Database & Schema).
@@ -160,6 +162,7 @@ The operational wrapper that makes the schema usable across environments: one re
 - **property / room**: Physical hierarchy; a room persists across tenancies with one active tenancy.
 - **tenancy / tenant / sender_alias**: Occupancy period and privacy boundary (tenancy); namespace for matched sender names used in `tenant_payment` matching.
 - **admin_user / tenant_access_credential / tenant_session**: Identity and authentication; hashed credentials, versioned for revocation, sessions with validity rules.
+- **tenant_login_attempt**: Operational, prunable rate-limiting history keyed by tenancy and source IP; never part of financial history.
 - **billing_config / billing_override / standard_amount_change**: Org-wide standard amount, per-tenancy/month bill-or-skip decisions, and append-only rate-change history.
 - **transaction**: Normalized source row (tenant_payment or utility_bill_payment), append-only, with duplicate key.
 - **monthly_bill**: Per-tenancy/month billing state snapshotting the standard amount.
@@ -192,5 +195,6 @@ The operational wrapper that makes the schema usable across environments: one re
 - The schema is delivered as one coherent, reversible baseline migration chain; per-module migration splitting is not required because nothing is yet deployed that would need independent versioning.
 - The architectural choice of the data-access layer and migration tooling is already locked by `docs/03` §6.6 and the constitution; this spec captures the deliverable and its invariants, and the isolated tooling references reflect already-decided constraints rather than new implementation detail.
 - The production database engine is PostgreSQL with SQLite used only for local development (constitution Database & Schema).
+- Timestamps are stored in UTC. On SQLite, the `DateTime(timezone=True)` values are timezone-aware datetimes stored as UTC; calendar-month boundaries (`billing_month`, "current month", utility spend grouping) are computed in application code from the organization's `timezone`, not by the database engine.
 - The first implementation pass targets **User Story 1 only** (Structural & Identity Foundation), per the MVP-first strategy in `tasks.md`; the remaining user stories and polish are planned for subsequent passes.
 - Locally, **SQLite is the only validated engine** (no local PostgreSQL on the dev machine). PostgreSQL-native DDL — immutable-table triggers and `postgresql_where` partial unique indexes (spec SC-002) — is authored in the code now but **validated in CI/deploy**, not locally. Consequently SC-005/SC-006/SC-007 and the Postgres-native acceptance scenarios are confirmed in CI/deploy; the SQLite scenarios are confirmed locally.

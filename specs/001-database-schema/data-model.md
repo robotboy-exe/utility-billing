@@ -8,7 +8,7 @@
 
 **Immutable (append-only, `created_at` only)**: `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`.
 **Mutable (`updated_at`)**: `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `monthly_bill`, `billing_config`, `billing_override`, `portal_setting`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `utility_provider`, `tenant_access_credential`, `admin_user`.
-**Write-once operational (no `updated_at`; closed via semantic field)**: `tenant_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`).
+**Write-once operational (no `updated_at`; closed via semantic field or append-only)**: `tenant_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`), `tenant_login_attempt` (append-only rate-limiting history, prunable).
 
 ---
 
@@ -24,19 +24,26 @@ Represents the administrator login (MVP: one admin per org).
 Hashed shared access code per tenancy.
 - Fields: `id`, `tenancy_id` (FK→tenancy NOT NULL UNIQUE), `access_code_hash` (TEXT NOT NULL), `credential_version` (INT NOT NULL DEFAULT 1), `is_active` (BOOL NOT NULL DEFAULT true), `created_at`, `updated_at`, `rotated_at` (semantic).
 - State transition (rotation): reset → increment `credential_version`, update hash, set `rotated_at`; prior sessions invalid.
+- Notes: `access_code_hash` is NOT globally unique — codes are verified only against the tenancy of the selected room, by tenancy plus code. No unique index spans tenancies.
 
 ### tenant_session (write-once operational)
 Read-only session token snapshot for the tenant portal.
 - Fields: `id`, `credential_id` (FK→tenant_access_credential NOT NULL), `credential_version` (INT NOT NULL snapshot), `token_hash` (TEXT NOT NULL), `device_info` (TEXT), `issued_at`, `expires_at`, `revoked_at`, `created_at`.
 - Validity rule (derived): `revoked_at IS NULL AND expires_at > now() AND credential_version = credential.credential_version AND credential.is_active = true`.
-- Notes: multiple concurrent sessions allowed; closed via `revoked_at` (no in-place edits).
+- Notes: multiple concurrent sessions allowed; closed via `revoked_at` (no in-place edits). `expires_at` is fixed at issuance and never extended on use. Session lifetime (e.g. 30 days) is application configuration, not schema.
+
+### tenant_login_attempt (write-once operational)
+Rate-limiting history for tenant access-code attempts. Operational, prunable; never financial.
+- Fields: `id`, `organization_id` (FK→organization NOT NULL, org-scoped), `tenancy_id` (FK→tenancy, nullable — null when the room is unknown), `source_ip` (TEXT), `attempted_at` (timestamptz, UTC), `succeeded` (BOOLEAN NOT NULL), `created_at`.
+- Indexes: `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)`.
+- Notes: stored in the database so rate limiting survives free-host restarts; thresholds (e.g. 5 failures / 15 min, 15-min lockout) are application configuration, not schema.
 
 ---
 
 ## 2. Organization & Property
 
 ### organization (mutable)
-Root isolation boundary (ADR-001); owns all scoped records. `id`, `name` (TEXT NOT NULL), `created_at`, `updated_at`.
+Root isolation boundary (ADR-001); owns all scoped records. `id`, `name` (TEXT NOT NULL), `timezone` (TEXT NOT NULL DEFAULT `Africa/Lagos`, IANA name validated in app code; instants stored UTC, calendar-month boundaries computed in this timezone), `created_at`, `updated_at`.
 
 ### property (mutable)
 Physical building. `id`, `organization_id` (FK NOT NULL → org for scoping), `name` (TEXT NOT NULL), `created_at`, `updated_at`.
@@ -122,7 +129,7 @@ Outgoing provider payment; never settles tenant bills. `id`, `organization_id` F
 ## 7. Transaction Ingestion
 
 ### import_profile (mutable, global registry)
-Global/system-wide parser config; `organization_id` nullable. `id`, `organization_id` FK null, `code` (TEXT UNIQUE e.g. PAYVICE_AVANTUS), `display_name`, `source_type` (`pdf|csv|xlsx`), `detection_config` (JSON), `parse_config` (JSON), `file_limits` (JSON), `is_active`, `created_at`, `updated_at`.
+Global/system-wide parser config; `organization_id` nullable. `id`, `organization_id` FK null, `code` (TEXT UNIQUE e.g. PAYVICE_AVANTUS), `display_name`, `source_type` (`pdf` only — CSV/XLSX are out of MVP scope), `detection_config` (JSON), `parse_config` (JSON), `file_limits` (JSON), `is_active`, `created_at`, `updated_at`.
 
 ### import_channel_category_mapping (mutable)
 Channel→category routing config. `id`, `import_profile_id` FK, `channel` TEXT, `direction` (`credit|debit|null`), `category` (`tenant_payment|utility_bill_payment|ignored|excluded|unrecognized`), `created_at`, `updated_at`.
@@ -131,9 +138,10 @@ Channel→category routing config. `id`, `import_profile_id` FK, `channel` TEXT,
 
 ### import_batch (mutable)
 Staged/confirmed import operation metadata.
-- Fields: `id`, `organization_id` FK, `import_profile_id` FK, `status` (`parsing|staged|duplicate_statement|totals_mismatch|confirmed|rejected|completed|failed`), statement header fields, `totals_credit_minor`, `totals_debit_minor`, `currency` CHAR(3) default NGN, `totals_status` (`valid|mismatch|missing`), `statement_fingerprint` TEXT, `ignored_summary` JSON, staged row counters/totals, `uploaded_at`, `confirmed_at`, `created_at`, `updated_at`.
+- Fields: `id`, `organization_id` FK, `import_profile_id` FK, `status` (`parsing|staged|duplicate_statement|totals_mismatch|confirmed|rejected|completed|failed`), statement header fields, `source_file_sha256` (CHAR(64)), `source_filename`, `source_page_count`, `currency` CHAR(3) default NGN, `totals_status` (`valid|mismatch|missing`), `statement_fingerprint` TEXT, `ignored_summary` JSON, staged row counters/totals, `uploaded_at`, `confirmed_at`, `created_at`, `updated_at`.
 - Constraint: partial unique `UNIQUE(statement_fingerprint) WHERE status IN ('confirmed','completed')` (PG-native; **invariant** — duplicate-statement detection; allows re-import after rejection).
 - State transition: `parsing → staged → confirmed → completed`; failure/skip branches `totals_mismatch`, `duplicate_statement`, `rejected`, `failed`.
+- Notes: statement-footer credit/debit totals are NOT persisted — they include commissions (ADR-019) and are compared in memory then discarded; only `totals_status` is stored. `source_file_sha256` detects a re-presented file and is distinct from the content-based `statement_fingerprint`; the PDF is not retained (ADR-012, ADR-019).
 
 ### staged_import_row (write-once operational)
 Staged row surviving between parse and confirm. `id`, `import_batch_id` FK, `row_category` (`tenant_payment|utility_bill_payment`), date/time, `channel`, `direction`, `description_raw`, `counterparty_name`, `counterparty_reference`, `amount_minor` (CHECK >0), `duplicate_key`, `parse_status` (`valid|duplicate|invalid|unrecognized`), `parse_error`, `committed_transaction_id` FK null, `created_at`.
@@ -146,7 +154,7 @@ Staged row surviving between parse and confirm. `id`, `import_batch_id` FK, `row
 ### portal_setting (mutable)
 Configurable visibility/default view. `id`, `scope_type` (`organization|property`), `scope_id` (UUID), `setting_key`, `setting_value`, `created_at`, `updated_at`.
 - Constraints: `UNIQUE(scope_type, scope_id, setting_key)`, `CHECK (scope_type IN ('organization','property'))`.
-- Example keys: `default_view`, `allow_other_room_amount_due`, `allow_property_utility_spend`, `allow_other_room_tenant_names`.
+- Example keys: `default_view`, `allow_other_room_amount_due` (default `false` — other rooms see property aggregates; per-room amount/status is admin opt-in, tenants cannot opt in/out), `allow_property_utility_spend`, `allow_other_room_tenant_names`.
 
 ---
 
@@ -183,4 +191,4 @@ Append-only admin/system action record. `id`, `organization_id` FK, `actor_type`
 
 ## Indexes (`docs/04` §9)
 
-Applied as documented: transaction `(organization_id, transaction_date)`, `(tenancy_id)`, `(import_batch_id)`, `(record_category)`; monthly_bill `(billing_month)`, `(organization_id, billing_month)`; payment_allocation `(transaction_id)`, `(monthly_bill_id)`; advance_movement `(transaction_id)`, `(tenancy_id, occurred_at)`; utility_bill_payment `(provider_id, spend_month)`, `(organization_id, spend_month)`; sender_alias `(organization_id, normalized_name)`; staged_import_row `(import_batch_id)`; audit_log `(organization_id, created_at)`, `(entity_type, entity_id)`; import_batch `(statement_fingerprint)`.
+Applied as documented: transaction `(organization_id, transaction_date)`, `(tenancy_id)`, `(import_batch_id)`, `(record_category)`; monthly_bill `(billing_month)`, `(organization_id, billing_month)`; payment_allocation `(transaction_id)`, `(monthly_bill_id)`; advance_movement `(transaction_id)`, `(tenancy_id, occurred_at)`; utility_bill_payment `(provider_id, spend_month)`, `(organization_id, spend_month)`; sender_alias `(organization_id, normalized_name)`; staged_import_row `(import_batch_id)`; audit_log `(organization_id, created_at)`, `(entity_type, entity_id)`; import_batch `(statement_fingerprint)`; tenant_login_attempt `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)`.

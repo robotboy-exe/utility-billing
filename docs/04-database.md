@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.4.0`
+Version: `0.5.0`
 Status: Draft — design phase, no implementation yet
-Last Updated: 2026-09-17
+Last Updated: 2026-10-03
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Added a `currency CHAR(3) NOT NULL` column to `import_batch` so control totals and ignored-summary amounts are explicitly denominated, keeping §3.5 universal with no new exception. Scoped the "global" wording to distinguish the standard amount (org-wide) from utility providers and import profiles (system-wide). Carried forward from 0.3.2: a `currency CHAR(3) NOT NULL` column on the remaining persisted money-bearing tables (`monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`), the §3.2 timestamp gaps (`created_at` on `billing_config`, `portal_setting`, `tenant_session`; `updated_at` on every mutable table), and the advance-movement `reversed` semantics scoped to undoing a `created` movement only.
+Changes in this version: Added `organization.timezone TEXT NOT NULL DEFAULT 'Africa/Lagos'` so calendar-month boundaries (`billing_month`, "current month", utility spend grouping) are computed in the organization's business timezone while instants stay UTC (ADR-028). Added the operational, prunable `tenant_login_attempt` table with `(tenancy_id, attempted_at)` and `(source_ip, attempted_at)` indexes; rate limiting is stored in the database (free hosts restart; process memory is not reliable). Clarified that tenant access code hashes are not unique across tenancies (verification is by tenancy plus code) and that `tenant_session.expires_at` is fixed at issuance and never extended on use (5 failures/15 min, 15-min lockout, 30-day sessions, 8-character codes are application configuration, not schema). Removed the persisted statement-footer control totals from `import_batch` (`totals_credit_minor`, `totals_debit_minor`); footer totals are compared in memory and discarded, keeping only `totals_status` (ADR-019). Added `source_file_sha256` (CHAR(64)), `source_filename` and `source_page_count` to `import_batch`; the PDF itself is not retained (ADR-012, ADR-019). Restricted `import_profile.source_type` to `pdf` only — CSV/XLSX are out of the MVP. Set the documented default of `portal_setting.allow_other_room_amount_due` to `false`: other rooms see property aggregates by default, and per-room amount/status is admin opt-in per organization or property.
 
 ---
 
@@ -167,6 +167,7 @@ AdminUser ─── Organization
                   │                    ├──< SenderAlias
                   │                    ├──< MonthlyBill ──< BillAdjustment
                   │                    ├──< TenantAccessCredential ──< TenantSession
+                  │                    ├──< TenantLoginAttempt
                   │                    ├──< AdvanceMovement
                   │                    └──< Transaction (tenant_payment, matched)
                   │                              ├──< PaymentAllocation >── MonthlyBill
@@ -226,6 +227,7 @@ Tables are grouped by domain.
 Notes:
 - Resetting the code increments `credential_version` and updates `access_code_hash`.
 - Sessions issued against an older version become invalid.
+- Access codes are generated, hashed, and verified only against the tenancy of the selected room. Codes are not unique across tenancies: there is no uniqueness constraint over the hash, and lookup is by tenancy plus code, never by hash alone across tenancies.
 
 ---
 
@@ -256,6 +258,28 @@ session is valid when:
 Notes:
 - Multiple concurrent sessions per tenancy are allowed (multiple rows).
 - Read-only by design; no tenant-initiated mutations.
+- `expires_at` is fixed at issuance and never extended on use. The validity rule checks `expires_at > now()`; it never slides the expiry forward.
+- Session lifetime and code length (e.g. 30-day sessions, 8-character codes) are application configuration, not schema.
+
+---
+
+#### tenant_login_attempt
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Org-scoped for rate limiting |
+| tenancy_id | UUID | FK → tenancy | Nullable; an attempt against an unknown room has none |
+| source_ip | TEXT | | Client IP |
+| attempted_at | timestamptz | NOT NULL | UTC |
+| succeeded | BOOLEAN | NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Operational, prunable table backing rate limiting. Rate limiting is stored in the database, not process memory, because free hosts restart (ADR-012).
+- Thresholds (e.g. 5 failures per 15 minutes, 15-minute lockout) are application configuration, not schema.
+- An attempt against an unknown room is recorded with `tenancy_id` null.
+- Not a financial table; never part of the append-only list (see Section 11.6).
 
 ---
 
@@ -267,8 +291,13 @@ Notes:
 |---|---|---|---|
 | id | UUID | PK | |
 | name | TEXT | NOT NULL | |
+| timezone | TEXT | NOT NULL DEFAULT 'Africa/Lagos' | IANA business timezone (ADR-028) |
 | created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | | |
+
+Notes:
+- The IANA name is validated in application code; the database stores whatever string it is given.
+- Instants are stored in UTC. Calendar-month boundaries — `billing_month`, "current month", and utility-spend grouping — are computed in the organization's business timezone (ADR-028). The timezone is a single org-wide setting; it is not per-property in the MVP.
 
 ---
 
@@ -387,7 +416,7 @@ Notes:
 | id | UUID | PK | |
 | organization_id | UUID | FK → organization, NOT NULL | |
 | tenancy_id | UUID | FK → tenancy, NOT NULL | |
-| billing_month | DATE | NOT NULL | First day of month |
+| billing_month | DATE | NOT NULL | First day of month, in the org's business timezone |
 | decision | TEXT | NOT NULL | `bill` or `skip` |
 | reason | TEXT | | Optional |
 | created_by_admin_id | UUID | FK → admin_user | |
@@ -468,7 +497,7 @@ Notes:
 | id | UUID | PK | |
 | organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
 | tenancy_id | UUID | FK → tenancy, NOT NULL | |
-| billing_month | DATE | NOT NULL | First day of the month |
+| billing_month | DATE | NOT NULL | First day of the month, in the org's business timezone |
 | standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | Snapshot at generation |
 | final_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | After any adjustment |
 | currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
@@ -607,7 +636,7 @@ Notes:
 | amount_minor | BIGINT | NOT NULL CHECK (> 0) | |
 | currency | CHAR(3) | NOT NULL | |
 | payment_datetime | timestamptz | NOT NULL | |
-| spend_month | DATE | NOT NULL | First day of payment calendar month |
+| spend_month | DATE | NOT NULL | First day of payment calendar month, in the org's business timezone |
 | import_batch_id | UUID | FK → import_batch | |
 | created_at | timestamptz | NOT NULL | |
 
@@ -630,7 +659,7 @@ Global / system-wide. Seeded once for the whole application.
 | organization_id | UUID | FK → organization | Nullable; null = global. MVP uses global. |
 | code | TEXT | NOT NULL, UNIQUE | e.g. PAYVICE_AVANTUS |
 | display_name | TEXT | NOT NULL | |
-| source_type | TEXT | NOT NULL | pdf / csv / xlsx |
+| source_type | TEXT | NOT NULL | pdf — CSV/XLSX are out of MVP scope |
 | detection_config | JSONB | | Signatures, structural rules |
 | parse_config | JSONB | | Date/time/amount/direction rules |
 | file_limits | JSONB | | Max size, max pages |
@@ -683,11 +712,12 @@ Notes:
 | statement_account_number | TEXT | | |
 | statement_start_date | DATE | | |
 | statement_end_date | DATE | | |
-| totals_credit_minor | BIGINT | | From footer |
-| totals_debit_minor | BIGINT | | From footer |
+| source_file_sha256 | CHAR(64) | | SHA-256 of the presented file |
+| source_filename | TEXT | | Original file name |
+| source_page_count | INTEGER | | Pages in the presented file |
 | currency | CHAR(3) | NOT NULL | Statement currency; MVP is NGN |
 | totals_status | totals_status | | valid / mismatch / missing |
-| statement_fingerprint | TEXT | | Hash for duplicate-statement detection |
+| statement_fingerprint | TEXT | | Content-based duplicate-detection hash |
 | ignored_summary | JSONB | | Counts/amounts for ignored categories |
 | tenant_payment_row_count | INTEGER | | Persistable tenant-payment rows staged |
 | tenant_payment_total_minor | BIGINT | | Staged tenant-payment amount total |
@@ -708,9 +738,12 @@ UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')
 ```
 
 Notes:
+- The statement-footer credit and debit totals are **not persisted**. Footer totals include commission amounts (ADR-019), so they are compared against the parsed rows in memory and discarded; only `totals_status` is persisted.
 - `ignored_summary` may include TRANSFER/CHARGE/VAT counts and totals.
 - `ignored_summary` must never include commission data.
-- `totals_credit_minor`, `totals_debit_minor`, and any monetary amounts inside `ignored_summary` are expressed in the batch `currency`.
+- `source_file_sha256` is a hash of the presented file, so the admin can tell that a re-presented file is the same one imported. It is separate from the content-based `statement_fingerprint`, which stays.
+- The PDF is not retained (ADR-012, ADR-019); `source_filename` and `source_page_count` are display metadata only.
+- Any monetary amounts inside `ignored_summary` and the `*_total_minor` staged-row totals are expressed in the batch `currency`.
 - The staged-row counters and their `*_total_minor` amount totals are populated at parse time and are expressed in the batch `currency`.
 - The partial unique index prevents committing the same statement twice while still allowing re-import after rejection.
 
@@ -776,7 +809,7 @@ Notes:
 - Resolution order: property-level overrides organization-level; otherwise use application default.
 - Example keys:
   - `default_view` → `property` | `room`
-  - `allow_other_room_amount_due` → `true`
+  - `allow_other_room_amount_due` → `false` (default). Other rooms see property aggregates by default; per-room amount and status are opt-in by the admin, per organization or property. Tenants cannot opt in or out.
   - `allow_property_utility_spend` → `true`
   - `allow_other_room_tenant_names` → `false`
 
@@ -889,7 +922,7 @@ spend = SUM(utility_bill_payment.amount_minor)
 ```
 
 Notes:
-- Month-bounded by the payment's calendar month.
+- Month-bounded by the payment's calendar month, computed in the org's business timezone.
 - Does not reconcile tenant balances.
 
 ### 7.8 Optional read model
@@ -944,6 +977,8 @@ Recommended indexes beyond primary keys and unique constraints.
 | audit_log | (organization_id, created_at) | Audit queries |
 | audit_log | (entity_type, entity_id) | Entity history |
 | import_batch | (statement_fingerprint) | Duplicate statement detection |
+| tenant_login_attempt | (tenancy_id, attempted_at) | Tenancy-scoped login-attempt history |
+| tenant_login_attempt | (source_ip, attempted_at) | IP-scoped rate limiting |
 
 ---
 
@@ -1016,7 +1051,7 @@ These may be updated normally:
 - tenant_access_credential (rotation)
 - admin_user
 
-This list equals exactly the tables carrying `updated_at`. Two write-once operational tables are excluded: `tenant_session` and `staged_import_row`. Their rows are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits, and they are governed by Sections 11.3 and 11.4.
+This list equals exactly the tables carrying `updated_at`. Three write-once operational tables are excluded: `tenant_session`, `staged_import_row`, and `tenant_login_attempt`. `tenant_session` and `staged_import_row` are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits; `tenant_login_attempt` is append-only operational data for rate limiting. All three are governed by Sections 11.3, 11.4 and 11.6. `tenant_login_attempt` is operational, prunable data; it is not a financial table and is not part of immutable financial history.
 
 ### 11.3 Staged row retention
 
@@ -1029,6 +1064,10 @@ Expired or revoked `tenant_session` rows may be pruned periodically. `tenant_ses
 ### 11.5 Commission data
 
 Commission data is never stored anywhere and therefore has no retention concern. It must also be excluded from logs and error output.
+
+### 11.6 Login-attempt retention
+
+`tenant_login_attempt` rows may be pruned periodically. Login attempts are operational/ephemeral rate-limiting data, not financial history.
 
 This classification covers every table specified in Section 6.
 
@@ -1047,7 +1086,7 @@ This classification covers every table specified in Section 6.
   - Channel/category mappings for the Payvice Avantus profile.
   - One global utility provider: `BEDC` (organization_id null).
   - One default `billing_config` row for the organization with the deployment's standard monthly amount (admin-configurable and required before the first lazy bill generation).
-  - Default portal settings.
+  - Default portal settings: `default_view` = `property`, `allow_other_room_amount_due` = `false` (per-room amount/status is admin opt-in), `allow_property_utility_spend` = `true`, `allow_other_room_tenant_names` = `false`.
 
 ---
 

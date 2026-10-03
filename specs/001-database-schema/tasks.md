@@ -61,12 +61,14 @@
 
 - [x] T008 [P] [US1] Uniqueness/constraint tests in `tests/test_uniqueness.py` for: active tenancy per room (`UNIQUE (room_id) WHERE status='active'`), sender_alias (`UNIQUE (tenancy_id, normalized_name)`), UUID PK + org scoping presence on org-hierarchy tables
 - [x] T009 [P] [US1] Identity validity tests in `tests/test_identity.py` for credential rotation (version increment revokes prior sessions) and tenant_session validity rule (revoked_at IS NULL AND expires_at > now() AND credential_version = credential.credential_version AND credential.is_active = true)
+- [ ] T009a [P] [US1] Timezone and login-attempt delta tests in `tests/test_schema_deltas.py` against a fresh in-memory SQLite DB: `organization.timezone` defaults to `Africa/Lagos` and an invalid IANA name is rejected in application code; a `tenant_login_attempt` persists with and without a tenancy; two tenancies can hold credentials with the same hash (no global uniqueness on `access_code_hash`); `tenant_session.expires_at` stays fixed after the session is used
 
 ### Implementation for User Story 1
 
-- [x] T010 [P] [US1] Create organization, property, room models in `backend/src/models/org.py` (org scoping: property.organization_id FK NOT NULL; room reachable via room → property → organization)
+- [x] T010 [P] [US1] Create organization, property, room models in `backend/src/models/org.py` (org scoping: property.organization_id FK NOT NULL; room reachable via room → property → organization; organization.timezone TEXT NOT NULL DEFAULT 'Africa/Lagos' with IANA validation in application code)
 - [x] T011 [P] [US1] Create tenancy, tenant, sender_alias models in `backend/src/models/tenancy.py` (tenancy: status default draft, denormalized organization_id, partial unique active-tenancy; sender_alias: normalized_name unique per tenancy)
-- [x] T012 [P] [US1] Create admin_user, tenant_access_credential, tenant_session models in `backend/src/models/identity.py` (email UNIQUE; password_hash never plaintext; credential versioned; session write-once with semantic revoked_at)
+- [x] T012 [P] [US1] Create admin_user, tenant_access_credential, tenant_session models in `backend/src/models/identity.py` (email UNIQUE; password_hash never plaintext; credential versioned and NOT unique across tenancies; session write-once with semantic revoked_at and fixed expires_at)
+- [ ] T012a [P] [US1] Add tenant_login_attempt model in `backend/src/models/identity.py` (UUID PK, organization_id FK NOT NULL, tenancy_id FK nullable, source_ip TEXT, attempted_at timestamptz UTC, succeeded BOOLEAN NOT NULL, created_at; indexes (tenancy_id, attempted_at) and (source_ip, attempted_at))
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -218,7 +220,7 @@
 
 ### Implementation for User Story 7
 
-- [ ] T028 [US7] Create single reversible baseline migration `backend/src/migrations/versions/0001_initial_schema.py` defining ALL tables (all stories) in FK creation order, with Postgres-native partial unique indexes (`postgresql_where=...`) for active-tenancy and statement fingerprint (R-4), and `BEFORE UPDATE`/`BEFORE DELETE` triggers on the 7 immutable tables (R-5: transaction, payment_allocation, advance_movement, bill_adjustment, standard_amount_change, utility_bill_payment, audit_log), reversible up/down
+- [ ] T028 [US7] Create single reversible baseline migration `backend/src/migrations/versions/0001_initial_schema.py` defining ALL tables (all stories) in FK creation order, with Postgres-native partial unique indexes (`postgresql_where=...`) for active-tenancy and statement fingerprint (R-4), and `BEFORE UPDATE`/`BEFORE DELETE` triggers on the 7 immutable tables (R-5: transaction, payment_allocation, advance_movement, bill_adjustment, standard_amount_change, utility_bill_payment, audit_log), reversible up/down. Must include the 0.5.0 schema deltas: `organization.timezone TEXT NOT NULL DEFAULT 'Africa/Lagos'`, the `tenant_login_attempt` table with `(tenancy_id, attempted_at)` and `(source_ip, attempted_at)` indexes, removal of `import_batch.totals_credit_minor`/`totals_debit_minor` in favor of in-memory footer-total comparison plus `source_file_sha256 CHAR(64)`/`source_filename`/`source_page_count`, `import_profile.source_type` restricted to `pdf`, and default portal settings with `allow_other_room_amount_due` = `false`
 - [ ] T029 [P] [US7] Implement idempotent seed in `backend/src/seed.py` (upsert: default organization, one admin, global `PAYVICE_AVANTUS` import profile + channel/category mappings, global `BEDC` utility provider, default org-wide `billing_config`, default portal settings) — re-runnable without duplicates/errors, never includes commission data
 - [ ] T030 [P] [US7] Schema reversibility + seed-idempotency + engine-equivalence tests in `tests/test_schema.py` and `tests/test_seed.py` (SC-005: upgrade→downgrade→upgrade clean; SC-006: seed twice is no-op; SC-007: Postgres/SQLite structural equivalence)
 
