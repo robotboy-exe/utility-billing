@@ -18,8 +18,9 @@ ADR-021, ADR-025).
 
 ### II. Billing Engine Independence
 The billing engine MUST operate on domain-level data only and MUST NOT depend on
-transaction source (PDF/CSV/XLSX), the frontend, the API, the ORM, or external
-integrations. Every transaction source MUST be normalized into a common transaction
+transaction source (PDF statement, manual entry, or any future source), the
+frontend, the API, the ORM, or external integrations. Every transaction source
+MUST be normalized into a common transaction
 model at the ingestion boundary before entering billing logic. Adding a transaction
 source, utility provider, or category mapping MUST NOT require changes to the
 billing engine.
@@ -30,12 +31,15 @@ ingestion or UI churn from introducing bugs into allocation (ADR-004, ADR-007).
 Imports MUST be staged and admin-confirmed before any financial records are
 committed; no record is written without review. Duplicate detection MUST prevent
 re-importing the same statement and the same transaction row. Control totals MUST
-be validated, and a mismatch MUST NOT be silently ignored. Commission rows MUST be
+be validated: a mismatch or a missing footer MUST block confirmation of the
+batch, and only the validation status MAY be persisted (statement footer totals
+include commission amounts and MUST NOT be stored). Commission rows MUST be
 fully discarded — never stored, displayed, counted, logged, or reported. Category
 mapping and utility providers MUST be configuration- and registry-driven, not
 hardcoded in the parser or billing engine.
 Rationale: Ingestion is the trust boundary; validated, idempotent, staged intake
-prevents corrupt or duplicated financial data (ADR-014, ADR-015, ADR-016, ADR-019).
+prevents corrupt or duplicated financial data (ADR-014, ADR-015, ADR-016,
+ADR-019, 03 §10.1).
 
 ### IV. Two-Ledger Separation
 The Tenant Payment Ledger and the Utility Bill Payment Ledger MUST remain strictly
@@ -67,6 +71,10 @@ money handling are unacceptable (ADR-014; testing focus in 03 §15, 05 §16, 06 
   respected: corrections on financial tables use reversal/correction records.
 - Bill amount changes MUST be audited: any change to `monthly_bill.final_amount_minor`
   MUST have a corresponding `bill_adjustment` row.
+- Calendar-month boundaries (`billing_month`, the current month, utility-spend
+  grouping) MUST be computed in the organization's IANA business timezone
+  (`organization.timezone`, default `Africa/Lagos`). Instants MUST be stored in
+  UTC (ADR-028).
 
 ## Tech Stack & Deployment Constraints
 
@@ -77,8 +85,12 @@ money handling are unacceptable (ADR-014; testing focus in 03 §15, 05 §16, 06 
 - Deployment matches free-tier hosting: no background workers, no scheduled jobs,
   no persistent local file storage, and no email or webhook dependency. Imports and
   matching are admin-triggered and synchronous; bill generation is lazy/rolling.
-- Business logic MUST NOT depend on the chosen hosting provider
-  (deployment-model independence — SaaS, dedicated, or standalone).
+- Business logic MUST NOT depend on the chosen hosting provider or runtime;
+  hosting differences are configuration, not domain code (ADR-003).
+- Tenant portal access codes MUST be server-generated and verified only against
+  the selected room's tenancy. Failed attempts MUST be rate-limited with
+  database-backed counters, not in-memory state. Tenant sessions MUST expire at
+  a fixed time set at issuance (ADR-009).
 - Original statement PDF binaries MUST NOT be retained by default; export
   functionality is the backup strategy.
 
@@ -102,4 +114,4 @@ principles above.
   project owner. This is a solo project; there is no approval body distinct from
   ADR acceptance authority.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-16 | **Last Amended**: 2026-09-18
+**Version**: 1.2.0 | **Ratified**: 2026-09-16 | **Last Amended**: 2026-10-03
