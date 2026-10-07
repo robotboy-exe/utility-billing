@@ -1,12 +1,12 @@
 # Transaction Ingestion
 
 Document: `docs/06-transaction-ingestion.md`  
-Version: `0.3.0`  
+Version: `0.3.1`  
 Status: Draft — accepted MVP ingestion design  
-Last Updated: 2026-10-03  
+Last Updated: 2026-10-07  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`
 
-Changes in this version: CSV/XLSX statement import moved from a future profile to explicitly out of the MVP; payment webhooks refer to ADR-006; a totals mismatch or a missing footer now blocks confirmation of the batch, and only `totals_status` is persisted (04 0.5.1); the transient commission recognition during totals validation no longer has a disable-validation alternative; `source_file_sha256` is stored alongside the content-based statement fingerprint; the `import_batch` metadata list is aligned with 04 0.5.1 (`source_filename`, `source_page_count`); statement timestamps are interpreted in the organization timezone (ADR-028); PDF-retention wording closed (no "by default" — ADR-019).
+Changes in this version: clarifications only, no decision changed — §3.3 now names the stored file metadata (file SHA-256 `source_file_sha256`, original file name `source_filename`, page count `source_page_count`); §20 states how a blocked batch is resolved (re-upload a corrected statement or enter the transactions manually, 03 §10.1); §16 states that calendar months are computed in the organization's business timezone (ADR-028, 04).
 
 ---
 
@@ -116,6 +116,9 @@ The system stores:
 
 - Extracted persistable transaction rows.
 - Import batch metadata.
+- File SHA-256 (`source_file_sha256`).
+- Original file name (`source_filename`).
+- Page count (`source_page_count`).
 - Ignored-category summary counts and totals.
 - Validation results.
 
@@ -791,6 +794,8 @@ Rules:
 - Do not connect utility payments to tenant bills.
 - Do not use utility payments to reduce tenant balances.
 
+Calendar months are computed in the organization's business timezone (ADR-028; 04).
+
 Example:
 
 | Month | Provider | Total Spent |
@@ -953,6 +958,8 @@ totals_status = missing
 ```
 
 The missing footer also blocks confirmation of the batch; it is not merely flagged.
+
+A blocked batch is resolved by re-uploading a corrected statement or by entering the transactions manually (03 §10.1).
 
 ---
 
