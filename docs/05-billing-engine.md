@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.4.0`
-Status: Draft — accepted MVP billing rules
-Last Updated: 2026-10-03  
+Version: `0.4.1`
+Status: Draft — design phase
+Last Updated: 2026-10-09  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Lazy bill generation is named `ensure_bills_through(organization_id, month)` with the ADR-022 caller list — admin dashboard load, payment allocation, import batch confirm, admin report requests; tenant-session requests, including the tenant portal, are not callers — and the month computed in the organization timezone (ADR-028); the payment allocation section gains the ADR-022 transaction and locking order; the engine's independence is stated against any statement parser rather than specific CSV/XLSX formats.
+Changes in this version: Locked rule 10 clarified: payments and allocations stay immutable and a bill changes only through audited `bill_adjustment` rows (matching 04 §11.2); Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
 
 ---
 
@@ -810,7 +810,7 @@ The following rules are locked for MVP:
 7. The billing engine’s reconciliation is final.
 8. Advance credit is linked to the original payment.
 9. Advance credit is applied automatically to existing or newly generated bills.
-10. Bills, payments, and allocations are immutable historical records.
+10. Payments and allocations are immutable historical records; a bill changes only through audited `bill_adjustment` rows.
 11. Corrections use controlled reversal/adjustment mechanisms.
 12. Utility provider payments do not settle tenant bills.
 13. Advance credit movements are recorded in an append-only ledger and reconciled against the derived balance; mismatches are flagged.

@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.5.1`
-Status: Draft — design phase, no implementation yet
-Last Updated: 2026-10-03
+Version: `0.5.2`
+Status: Draft — design phase
+Last Updated: 2026-10-09
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Terminology consistency fix (PATCH): `tenant_login_attempt` rows are written once and may be pruned (Section 11.6), so the table is described as write-once, prunable operational data rather than append-only — it remains not a financial table and not part of immutable financial history.
+Changes in this version: §7.4's per-transaction quantity is renamed from the bill-level name `net_allocated` to `derived_unallocated`, so the advance-balance formula reads `SUM(derived_unallocated)` per §7.5 (the bill-level `net_allocated` in §7.1–§7.2 is unchanged); Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
 
 ---
 
@@ -873,7 +873,7 @@ outstanding = SUM(remaining) across the tenancy's bills where remaining > 0
 The advance **balance** is derived. It is not stored as a mutable number.
 
 ```text
-advance_balance = SUM(transaction.amount_minor - net_allocated)
+advance_balance = SUM(derived_unallocated)
                   across matched tenant_payment transactions
                   where unallocated remainder > 0
 ```

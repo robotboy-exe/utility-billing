@@ -1,14 +1,10 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.9.0`
-Status: Draft — consolidated source of truth for accepted MVP design decisions
-Last Updated: 2026-10-07
+Version: `0.9.1`
+Status: Consolidated source of truth
+Last Updated: 2026-10-09
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
-
-## Version history
-
-Version history and document lineage are in `changelog-03.md`.
 
 ---
 
@@ -292,7 +288,7 @@ The MVP must therefore be designed as follows:
 | Constraint | MVP design response |
 |---|---|
 | No reliable background jobs | Imports and matching are manually triggered by the admin. Bill generation is lazy/rolling and happens synchronously in response to real usage, so no background worker is needed. |
-| No reliable scheduled tasks | Monthly bills are generated lazily/on-demand the first time the system needs them (dashboard load, payment processing, report request), not by a scheduled task. |
+| No reliable scheduled tasks | Monthly bills are generated lazily/on-demand the first time the system needs them (admin dashboard load, payment allocation, import batch confirm, admin report requests), not by a scheduled task. |
 | Ephemeral filesystem | Do not rely on uploaded files remaining on the server. Store normalized transaction records in the database. |
 | Limited database storage | Keep financial records normalized and compact. Avoid storing original statement files unless explicitly required. |
 | Limited request timeout | Imports must be small enough to process synchronously. PDF parsing is bounded by file size and page limits. |
@@ -677,7 +673,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 
 *Detailed schema, constraints, indexes, and exact field definitions are specified in `04-database.md`.*
 
-This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
+This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `tenant_login_attempt`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
 
 ---
 
@@ -821,7 +817,7 @@ Does not reconcile tenant balances.
 - **Server-Side Authorization:** All access and visibility rules enforced server-side.
 - **Scoping:** Queries strictly scoped by `organization_id`, `property_id`, and `tenancy_id`. An automated test must fail if any data-access path lacks an `organization_id` filter (§15).
 - **Money Handling:** Single currency. All amounts stored as `BIGINT` minor units (e.g., ₦1,000 = 100000). No floating-point math.
-- **Immutability:** Financial records (transactions, allocations, advance movements, audit logs) are append-only. Corrections use reversal/correction records, never silent rewrites.
+- **Immutability:** Financial records are append-only; the authoritative table list is `04-database.md` §11.1. Corrections use reversal/correction records, never silent rewrites.
 - **Auditability:** Lightweight, append-only audit log for admin/system actions. Commission data is never logged. Tenants do not see the audit log.
 - *Detailed security implementations will belong in the planned `09-security.md` (see Section 17).*
 
@@ -982,7 +978,7 @@ docs/
 
 Document status:
 
-- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-027).
+- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-028).
 - Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, and `07`–`12`.
 
 The most important remaining documents are:

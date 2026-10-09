@@ -1,12 +1,12 @@
 # Transaction Ingestion
 
 Document: `docs/06-transaction-ingestion.md`  
-Version: `0.3.1`  
-Status: Draft — accepted MVP ingestion design  
-Last Updated: 2026-10-07  
+Version: `0.3.2`  
+Status: Draft — design phase  
+Last Updated: 2026-10-09  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`
 
-Changes in this version: clarifications only, no decision changed — §3.3 now names the stored file metadata (file SHA-256 `source_file_sha256`, original file name `source_filename`, page count `source_page_count`); §20 states how a blocked batch is resolved (re-upload a corrected statement or enter the transactions manually, 03 §10.1); §16 states that calendar months are computed in the organization's business timezone (ADR-028, 04).
+Changes in this version: Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
 
 ---
 

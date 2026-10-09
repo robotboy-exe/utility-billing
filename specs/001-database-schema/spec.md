@@ -83,7 +83,7 @@ The second, strictly separate ledger (`docs/03` §3.2, ADR-017): a registry of u
 
 ### User Story 5 - Transaction Ingestion (Priority: P2)
 
-The staged, admin-confirmed intake path (`docs/03` §6.7.4): import profiles, channel/category mappings, import batches, and staged rows. Ingestion is the trust boundary — records are staged and reviewed before commit, duplicates are detected, and commission rows are never staged (`docs/04` §8.4, constitution Principle III).
+The staged, admin-confirmed intake path (`docs/03` §6.7.4): import profiles, channel/category mappings, import batches, and staged rows. Ingestion is the trust boundary — records are staged and reviewed before commit, duplicates are detected, and commission rows are never staged (`docs/04` §8, constitution Principle III).
 
 **Why this priority**: Essential for the product's primary data entry, but it depends on the ledger tables being present to reference; hence P2 after the ledgers.
 
@@ -191,7 +191,7 @@ The operational wrapper that makes the schema usable across environments: one re
 - The complete `docs/04-database.md` schema is the source of truth; this feature implements it fully, with no reduction or ratio change. This decision was confirmed by reviewing `docs/03-mvp-architecture.md` §6.7, which shows the schema composing one integrated, cohesive artifact (cross-table invariants in `docs/04` §8 span slices), so a single spec (organized by module) is used rather than multiple sub-feature specs.
 - The MVP currency is NGN (ISO 4217); monetary examples use ₦.
 - Identifiers, money handling, org scoping, immutability, and ledger separation follow the ratified constitution (`.specify/memory/constitution.md`) and the locked ADRs (ADR-017, ADR-021, ADR-025, ADR-019, ADR-001).
-- `docs/04` §13 open questions are intentionally **out of scope** for this schema-creation feature and use their `docs/04`-suggested defaults: reports use plain queries (no materialized read model) per §7.8; staged-row and expired-session pruning are future operational concerns (the tables still carry the columns needed to support them) per §11.3–11.4; partial unique indexes are assumed acceptable per §7 (§8.4, §10.2).
+- `docs/04` §13 open questions are intentionally **out of scope** for this schema-creation feature and use their `docs/04`-suggested defaults: reports use plain queries (no materialized read model) per §7.8; staged-row and expired-session pruning are future operational concerns (the tables still carry the columns needed to support them) per §11.3–11.4; partial unique indexes are assumed acceptable per §7 (§8, §10.2).
 - The schema is delivered as one coherent, reversible baseline migration chain; per-module migration splitting is not required because nothing is yet deployed that would need independent versioning.
 - The architectural choice of the data-access layer and migration tooling is already locked by `docs/03` §6.6 and the constitution; this spec captures the deliverable and its invariants, and the isolated tooling references reflect already-decided constraints rather than new implementation detail.
 - The production database engine is PostgreSQL with SQLite used only for local development (constitution Database & Schema).
