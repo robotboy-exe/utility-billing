@@ -8,7 +8,7 @@ Every edit to a numbered doc in `docs/` must follow `docs/13-doc-conventions.md`
 - Read the doc's header first; classify the change MAJOR/MINOR/PATCH (13 §5: does it change what the system must do, or only how a locked decision is expressed?).
 - Bump `Version`, refresh `Last Updated` (ISO date of the bump), and write the change record **in the same commit**. Never edit a doc without bumping; never bump an untouched doc.
 - Flavor by role (13 §8): `03`'s history lives in `docs/changelog-03.md`; other numbered docs keep exactly one overwritten `Changes in this version:` line.
-- Frozen tables: 13 §12 and the ADR index (03 §16) are never amended; register new docs via PATCH to the referencing doc's index.
+- Frozen: 13 §12 (bump-history snapshot) is never amended. The ADR index (03 §16) is amended only to match each ADR file's H1/Status exactly (13 §6); register new docs via PATCH to the referencing doc's index.
 - One commit per pass with bump-list in the message: `docs: summary (03→0.8.2, 04→0.3.2)` (13 §9).
 - After any pass run the 13 §10 consistency/residue check and honor the §11 machine-checkable invariants.
 

@@ -1,13 +1,13 @@
 # Documentation Versioning Policy
 
 Document: `docs/13-doc-conventions.md`
-Version: `0.3.0`
+Version: `0.3.1`
 Status: Consolidated source of truth
 Last Updated: 2026-10-09
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
 Audience: human editors and AI agents (opencode / spec-kit).
 
-Changes in this version: ADR policy now allows in-place revision — superseded ADRs stay frozen (only the status line may change) while every other ADR may be edited, marking the H1 with ` (revised)`, setting Status to `Accepted (revised)`, and stating the reason in the commit; whitespace-only fixes are not revisions. The retire form is plain `Status: Retired`, with the pointer living in `Supersedes:` and the changelog. Invariant 4 is reworded to scope exactly one `Changes in this version:` line to each detail-doc header.
+Changes in this version: §8 corrects the ADR-index treatment — ADR index rows (03 §16) are not frozen and must match each ADR file's H1/Status exactly (§6, §11.6), while 13 §12 (bump-history snapshot) remains frozen.
 
 ---
 
@@ -98,8 +98,8 @@ Supersedes: <predecessors>        ← only where applicable
 - Every bump ships a change record. A bump with no written record is a policy violation.
 A document is **never** bumped to mirror another document's version change.
 Version histories travel in each doc's own change record plus git history (§9),
-never in another doc's body. Reference tables that mirror sibling numbers
-(13 §12, ADR indexes) are frozen once their owning document is created. Registering
+never in another doc's body. ADR index rows (03 §16) are not frozen; they must match each ADR file's H1/Status
+exactly (§6, §11.6); 13 §12 (bump-history snapshot) remains frozen. Registering
 a newly-created document in a referencing doc's index (e.g. adding `13-doc-conventions`
 to 03's tree) is a PATCH-level expression fix in that referencing doc — never
 coordination through 13.
