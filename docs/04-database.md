@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.5.2`
+Version: `0.5.3`
 Status: Draft — design phase
 Last Updated: 2026-10-09
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: §7.4's per-transaction quantity is renamed from the bill-level name `net_allocated` to `derived_unallocated`, so the advance-balance formula reads `SUM(derived_unallocated)` per §7.5 (the bill-level `net_allocated` in §7.1–§7.2 is unchanged); Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
+Changes in this version: §13 item 4 resolved — partial unique indexes are acceptable: the hosting provider must support them (03 §6.4), using `sqlite_where` for SQLite local development and `postgresql_where` for PostgreSQL.
 
 ---
 
@@ -1096,6 +1096,7 @@ This classification covers every table specified in Section 6.
 2. What is the retention window for `staged_import_row` after commit?
 3. Should expired/revoked `tenant_session` rows be pruned automatically, and how often?
 4. Is a partial unique index acceptable on the target free Postgres host for the statement fingerprint and active-tenancy rules?
+   Decision: Acceptable. The hosting provider must support partial unique indexes (03 §6.4); SQLite local development uses sqlite_where, PostgreSQL uses postgresql_where.
 5. Should `sender_alias.normalized_name` normalization rules be enforced in the database or only in the application layer?
 6. How often should the advance reconciliation invariant be checked (on every allocation, on demand, or as a periodic audit report)?
 
