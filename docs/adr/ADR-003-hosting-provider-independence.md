@@ -1,4 +1,4 @@
-# ADR-003 — Deployment-Model Independence (revised)
+# ADR-003 — Hosting Provider Independence (revised)
 
 **Status:** Accepted (revised)
 

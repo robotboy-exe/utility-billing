@@ -1,6 +1,6 @@
-# ADR-007 — Billing Engine Independence
+# ADR-007 — Billing Engine Independence (revised)
 
-**Status:** Accepted
+**Status:** Accepted (revised)
 
 ## Context
 
@@ -13,5 +13,5 @@ The billing engine must remain independent of transaction source, frontend, and 
 ## Consequences
 
 - The billing engine can be tested independently of the user interface, database ORM, and external integrations.
-- API endpoints and background tasks act as thin adapters that invoke the billing engine.
+- API endpoints act as thin adapters that invoke the billing engine; the MVP runs no background workers or scheduled jobs.
 - Changes to how transactions are ingested (e.g., adding a new PDF parser) do not risk introducing bugs into the financial allocation logic.

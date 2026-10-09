@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.9.1`
+Version: `0.9.2`
 Status: Consolidated source of truth
 Last Updated: 2026-10-09
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
@@ -923,13 +923,13 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 
 | ADR | Title | Status | Summary |
 |---|---|---|---|
-| 001 | Organization as Root Entity | Accepted | Top-level boundary for customer data. |
-| 002 | Multi-Tenant Architecture (revised) | Accepted (revised) | Single-organization MVP, org-scoped; SaaS deferred; self-hosting not a goal. |
-| 003 | Deployment-Model Independence (revised) | Accepted (revised) | Logic doesn't depend on the host or runtime. |
+| 001 | Organization as Root Entity (revised) | Accepted (revised) | Top-level boundary for customer data. |
+| 002 | Single-Organization MVP Scope (revised) | Accepted (revised) | Single-organization MVP, org-scoped; SaaS deferred; self-hosting not a goal. |
+| 003 | Hosting Provider Independence (revised) | Accepted (revised) | Logic doesn't depend on the host or runtime. |
 | 004 | Transaction Source Abstraction | Accepted | Normalizes all sources before billing. |
 | 005 | Statement Imports as MVP | Superseded by ADR-014 | Superseded by ADR-014 (PDF primary). |
 | 006 | Future Event-Driven Integrations (revised) | Accepted (revised) | Deferred; invariants in section 14.6. |
-| 007 | Billing Engine Independence | Accepted | Billing logic isolated from sources/UI. |
+| 007 | Billing Engine Independence (revised) | Accepted (revised) | Billing logic isolated from sources/UI. |
 | 008 | Tenant Portal Visibility Boundary (revised) | Accepted (revised) | Tenancy boundary; other rooms see aggregates by default. |
 | 009 | Shared Tenancy Access Code (revised) | Accepted (revised) | Shared code; generated, room-scoped, rate-limited, expiring sessions. |
 | 010 | Rate-Change Adjustments and Write-Offs (revised) | Accepted (revised) | No per-room overrides; systematic adjustments only. |

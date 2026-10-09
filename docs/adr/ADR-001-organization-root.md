@@ -1,13 +1,12 @@
-# ADR-001 — Organization as Root Entity
+# ADR-001 — Organization as Root Entity (revised)
 
-**Status:** Accepted
+**Status:** Accepted (revised)
 
 ## Context
 
-The application serves landlords and property managers and must support multiple
-customers. A top-level boundary is needed to isolate each customer's data, enabling
-the same codebase to serve multiple customers (multi-tenant SaaS) as well as
-dedicated and standalone deployments.
+The application serves landlords and property managers. A top-level boundary is needed to
+isolate each customer's data and keep the codebase organization-scoped by design (see
+ADR-002).
 
 ## Decision
 

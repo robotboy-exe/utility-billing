@@ -1,4 +1,4 @@
-# ADR-002 — Multi-Tenant Architecture (revised)
+# ADR-002 — Single-Organization MVP Scope (revised)
 
 **Status:** Accepted (revised)
 
