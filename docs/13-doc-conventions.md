@@ -1,20 +1,20 @@
 # Documentation Versioning Policy
 
 Document: `docs/13-doc-conventions.md`
-Version: `0.2.0`
+Version: `0.3.0`
 Status: Consolidated source of truth
-Last Updated: 2026-10-03
+Last Updated: 2026-10-09
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
 Audience: human editors and AI agents (opencode / spec-kit).
 
-Changes in this version: 03's change record moves out of the document into an append-only companion `docs/changelog-03.md`; the `Supersedes:` line becomes a plain comma-separated filename list with no narrative (provenance lives in the changelog); ADR revisions use one uniform annotated form (`Accepted (revised)`); superseding is no longer treated as the only way to change an Accepted ADR's Decision meaning.
+Changes in this version: ADR policy now allows in-place revision — superseded ADRs stay frozen (only the status line may change) while every other ADR may be edited, marking the H1 with ` (revised)`, setting Status to `Accepted (revised)`, and stating the reason in the commit; whitespace-only fixes are not revisions. The retire form is plain `Status: Retired`, with the pointer living in `Supersedes:` and the changelog. Invariant 4 is reworded to scope exactly one `Changes in this version:` line to each detail-doc header.
 
 ---
 
 ## 1. Scope and identifiers
 - Numbered design docs (`docs/00-…` … `docs/13-…`) are versioned **independently**.
   There is no repo-wide or suite-wide version.
-- ADR files (`docs/adr/ADR-NNN-slug.md`) are **unversioned** immutable records (§6).
+- ADR files (`docs/adr/ADR-NNN-slug.md`) are **unversioned** records (§6).
 - Retired/absorbed documents carry `Status: Retired` and are named in the absorbing
   document's `Supersedes:` line and in the changelog. They are never bumped again.
 
@@ -57,14 +57,13 @@ the difference is whether a decision was made.
 
 ## 6. ADR policy (unversioned)
 - ADR files carry **no `Version:` field, ever**. Identity = number + slug; authority = Status.
-- An Accepted ADR's Decision text is immutable in meaning. Permitted edits: clarifying
-  glosses that preserve meaning (e.g. ADR-023 "global (organization-wide)"), formatting
-  normalization, status annotations.
-- Changing a decision = (a) a new superseding ADR (ADR-014 supersedes ADR-005), or
-  (b) an owner-approved annotated revision. The uniform form: the Status line is exactly
-  `Accepted (revised)` and the H1 title ends with ` (revised)` (ADR-010 "(revised)");
-  what changed is recorded in the commit message.
-- Superseded ADRs keep file and number; Status becomes `Superseded by ADR-NNN`.
+- Superseded ADRs are frozen; only the status line `Superseded by ADR-N` may change.
+- A wholly replaced decision gets a new ADR, and the old ADR's Status becomes `Superseded by ADR-N` (e.g. ADR-014 supersedes ADR-005).
+- Superseded ADRs keep their file and number; they are never deleted or renumbered.
+- Every other ADR may be edited in place. Any content edit (including retitles and wording
+  fixes) adds ` (revised)` to the H1, sets Status to exactly `Accepted (revised)`, and states
+  the reason in the commit message.
+- Whitespace-only fixes (e.g. EOF newline) are not revisions.
 - The ADR index table in `03-mvp-architecture.md` §16 is the manifest: Title and Status
   cells must match each ADR file's H1 and Status exactly. Summary cells may be
   abbreviated paraphrases (accepted, intentional drift).
@@ -125,7 +124,7 @@ coordination through 13.
 2. `Last Updated` is a valid ISO date equal to the last bump commit touching that file.
 3. `03` contains neither `Document Lineage` nor `Changes in this version`; `docs/changelog-03.md` exists, and
    across commits its earlier content is only ever extended at the end.
-4. Detail docs and `13-doc-conventions.md` contain exactly one `Changes in this version:` line.
+4. Exactly one `Changes in this version:` line in each detail-doc header.
 5. No file under `docs/adr/` contains a `Version:` line.
 6. ADR index Title/Status cells equal the ADR files' H1/Status.
 7. Any commit changing a doc's body also changes its `Version` and change record in the
@@ -161,15 +160,15 @@ amended. Future bump history lives in git history (§8).
 
 ## 13. New and retired documents
 - A newly authored numbered doc starts at `0.1.0`.
-- Retiring: set `Status: Retired — superseded by <doc>`, stop bumping, and record the
-  absorption in the absorbing doc's `Supersedes:` line (when the file exists) and the
-  changelog. Never delete a retired doc silently in the same commit as a content change.
+- Retiring: set `Status: Retired`, stop bumping, and record the absorption in the
+  absorbing doc's `Supersedes:` line (when the file exists) and the changelog. Never
+  delete a retired doc silently in the same commit as a content change.
 
 ## 14. Agent operating instructions (spec-kit / opencode)
 Before editing any numbered doc: read its header; classify your change via §5; after
 editing, bump accordingly, refresh `Last Updated`, write the change record in the correct
 flavour (§8), and leave every untouched doc's header alone. Never add a version to an ADR.
-Never change an Accepted ADR's Decision meaning on your own initiative. Only a new
-superseding ADR, or an owner-approved revision using the form in §6(b), may do so. If a
-change would contradict a locked rule or an ADR, stop and raise a decision request rather
+Never change an Accepted ADR's Decision meaning on your own initiative. It requires owner
+approval and either a new superseding ADR or an in-place revision using the form in §6. If
+a change would contradict a locked rule or an ADR, stop and raise a decision request rather
 than editing prose around it.
