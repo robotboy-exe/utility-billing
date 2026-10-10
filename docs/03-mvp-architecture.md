@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.9.2`
+Version: `0.10.0`
 Status: Consolidated source of truth
-Last Updated: 2026-10-09
+Last Updated: 2026-10-10
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
 
 ---
@@ -397,7 +397,7 @@ The database is the authoritative persistence layer.
 
 ### 6.4 Candidate free-hosting shape
 
-The exact provider should be chosen before implementation, but the MVP should fit this general shape:
+The exact provider is recorded below, but the MVP should fit this general shape:
 
 | Component | Possible free hosting approach |
 |---|---|
@@ -410,7 +410,7 @@ The exact provider should be chosen before implementation, but the MVP should fi
 
 The business logic must remain independent of the selected hosting provider.
 
-**Provider selection is a blocking decision (status: not yet made).** Choose against these criteria before implementation: the database must not pause, expire or be deleted for inactivity or after a trial period; the backend must tolerate cold starts; the database must support the partial unique indexes and row-level locking this design uses (`04-database.md` open question 4); and the admin must be able to export and restore data (§5.3). Record the choice here and in `10-deployment.md`.
+**Provider selection is resolved:** the MVP choice is Render + Neon with an Oracle VM fallback, recorded in `10-deployment.md` §2. It meets the selection criteria: the database must not pause, expire or be deleted for inactivity or after a trial period; the backend must tolerate cold starts; the database must support the partial unique indexes and row-level locking this design uses (`04-database.md` open question 4); and the admin must be able to export and restore data (§5.3).
 
 ### 6.5 System Context
 
@@ -978,16 +978,13 @@ docs/
 
 Document status:
 
-- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-028).
-- Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, and `07`–`12`.
+- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `10-deployment.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-028).
+- Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, `07`–`09`, and `11`–`12`.
 
 The most important remaining documents are:
 
 `09-security.md`
 Authentication, authorization, session handling and tenant visibility policy. The access code requirements in §8.2 are the MVP minimum; `09` may tighten them and fixes the rate-limit and session defaults.
-
-`10-deployment.md`
-Free-hosting provider selection (blocking, §6.4), environment configuration, migrations, export threshold and restore procedure (§5.3).
 
 ---
 
@@ -995,7 +992,7 @@ Free-hosting provider selection (blocking, §6.4), environment configuration, mi
 
 The following items should be resolved before implementation of the relevant modules:
 
-1. Which free hosting provider will be used? Blocking; criteria in §6.4.
+1. Which free hosting provider will be used? Resolved: the MVP choice is Render + Neon with an Oracle VM fallback (`10-deployment.md` §2).
 2. Is the Payvice Avantus export format stable across billing-software versions?
 3. Do the initial rate-limit and session-lifetime defaults in §8.2 hold up? Confirm in `09-security.md`.
 4. What "last exported" warning threshold applies? Set in `10-deployment.md`.

@@ -40,3 +40,5 @@ Version 0.9.0 resolves the cross-document review: other rooms see property aggre
 Version 0.9.1 registers ADR-028 in the document-set index, mirrors the ADR-022 caller list in the scheduled-tasks response, adds `tenant_login_attempt` to the intentionally-excluded table list, and replaces §12's enumerated immutability list with a pointer to `04-database.md` §11.1; removes the version-history stub.
 
 Version 0.9.2 retitles ADR-002 to Single-Organization MVP Scope and ADR-003 to Hosting Provider Independence, and marks ADR-001 and ADR-007 revised to realign stale Context/Consequences wording with the single-organization, no-background-jobs MVP.
+
+Version 0.10.0 records the MVP hosting choice (Render + Neon, Oracle VM fallback) and registers 10-deployment.md; selection criteria unchanged.
