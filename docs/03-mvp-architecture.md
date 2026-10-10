@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.3`
+Version: `0.10.4`
 Status: Consolidated source of truth
 Last Updated: 2026-10-10
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, `changelog-03.md`
@@ -158,7 +158,7 @@ Rules:
 Purpose:
 
 - Record payments made to utility providers.
-- Provide a month-bounded provider spend report.
+- Provide a month-bounded utility spend report.
 - Serve as proof-of-payment records.
 
 Source in MVP:
@@ -169,7 +169,7 @@ Rules:
 
 - Utility payments do not settle tenant bills.
 - Utility payments do not enter tenancy matching.
-- Reporting is bounded by the payment's calendar month in the organization timezone (section 10.4).
+- Reporting is bounded by the payment's calendar month in the business timezone (section 10.4).
 - Future utility providers are registry-driven.
 
 ### 3.3 Ledger separation
@@ -212,7 +212,7 @@ The MVP includes:
 - PDF statement import from the Payvice Avantus billing software (primary transaction source).
 - Manual transaction entry (also the fallback for failed or blocked imports).
 - Utility provider registry with BEDC as the first provider.
-- Utility bill payment recording and a month-bounded provider spend report.
+- Utility bill payment recording and a month-bounded utility spend report.
 - Basic audit logging.
 - Admin full-data export with a "last exported" indicator (§5.3).
 - Free-hosting-friendly deployment.
@@ -300,7 +300,7 @@ The MVP must therefore be designed as follows:
 
 Lazy generation (ADR-022) is one function with one contract. Detailed bill rules are in `05-billing-engine.md`.
 
-- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active tenancy for each month up to and including `month`. `month` is computed in the organization timezone (§10.4). It consults `billing_override` (bill/skip decisions, ADR-024) before creating a bill.
+- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active tenancy for each month up to and including `month`. `month` is computed in the business timezone (§10.4). It consults `billing_override` (bill/skip decisions, ADR-024) before creating a bill.
 - **Idempotent by construction.** Creation is `INSERT ... ON CONFLICT (tenancy_id, billing_month) DO NOTHING`, backed by the unique constraint in `04-database.md`. Calling it twice, or concurrently, yields the same bills.
 - **Callers.** Admin dashboard load, payment allocation, import batch confirm, and admin report requests. Nothing else calls it (ADR-022).
 - **Not callers.** Tenant-session requests, including the tenant portal, are not callers (read-only, ADR-009). The portal reads existing bills and shows an "as of" date, so its figures can lag a month rollover until the next admin action.
@@ -740,7 +740,7 @@ Two-ledger rules: §3 (ADR-017).
 
 **10.2 Matching**
 - Only `tenant_payment` rows enter matching (primarily via normalized sender aliases).
-- `utility_bill_payment` rows bypass matching and go to the provider spend report.
+- `utility_bill_payment` rows bypass matching and go to the utility spend report.
 
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Lazy and rolling through `ensure_bills_through` (§5.2.1, ADR-022).
@@ -751,10 +751,10 @@ Two-ledger rules: §3 (ADR-017).
 - **Allocation:** Oldest-outstanding-first (ADR-020); overpayment becomes advance credit; advance balance is derived and every movement is logged and reconciled (ADR-021).
 - *Algorithms, edge cases and corrections are in `05-billing-engine.md`.*
 
-**10.4 Organization timezone (ADR-028)**
+**10.4 Business timezone (ADR-028)**
 - Each organization has one IANA timezone, default `Africa/Lagos` (UTC+1, no daylight saving).
 - All calendar-month boundaries use it: `billing_month`, "current month", the month `ensure_bills_through` generates through, and the grouping of utility spend.
-- Instants are stored as `timestamptz` (UTC). Statement timestamps carry no offset and are interpreted in the organization timezone.
+- Instants are stored as `timestamptz` (UTC). Statement timestamps carry no offset and are interpreted in the business timezone.
 - One timezone per organization in the MVP, not per property.
 
 *Owned by ADR-028 and `04-database.md`.*
@@ -806,7 +806,7 @@ My Room / My Tenancy view:
 - Advance or outstanding balance.
 - Bill adjustment details.
 
-### 11.3 Provider spend report
+### 11.3 Utility spend report
 
 A separate report derived from the Utility Bill Payment Ledger.
 
@@ -915,7 +915,7 @@ Tests required by this document:
 - **Bill generation:** `ensure_bills_through` called twice and concurrently creates one bill per tenancy-month; the tenant portal never triggers it (§5.2.1).
 - **Locking:** concurrent allocations and a double-submitted batch confirm leave consistent bills and a single confirmed batch.
 - **Control totals:** a mismatch or missing footer blocks confirmation; no commission data appears in the database, logs or error output (§10.1, ADR-019).
-- **Timezone:** bill and spend month boundaries around 23:59 and 00:00 on the last and first days of a month in the organization timezone (§10.4).
+- **Timezone:** bill and spend month boundaries around 23:59 and 00:00 on the last and first days of a month in the business timezone (§10.4).
 - **Tenant access:** rate limiting persists across an application restart; the lockout does not leak whether a room exists; sessions expire; code reset and tenancy closure revoke sessions (§8.2).
 - **Visibility:** with default settings, a tenant session cannot retrieve another room's amount, status or adjustment (§9.2).
 - **Export:** the export contains all organization records and no credential hashes (§5.3).
@@ -954,7 +954,7 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 | 025 | Debt Write-Offs, No Hard Deletes | Accepted | Audited zeroing of debt; no hard deletes. |
 | 026 | Closed Tenancies Lose Portal Access | Accepted | Portal credentials permanently deactivated. |
 | 027 | Property Dashboard Metrics | Accepted | Outstanding debt, room ratios, BEDC outflow. |
-| 028 | Business Timezone | Accepted | One organization timezone for all month boundaries. |
+| 028 | Business Timezone | Accepted | One business timezone for all month boundaries. |
 ---
 
 ## 17. Remaining Detailed Design Documents
@@ -1020,7 +1020,7 @@ A checklist of the rules above; each item is defined in the cited section.
 - Bills are generated lazily through one idempotent function, never by the tenant portal: §5.2.1 (ADR-022).
 - Uniform standard amount; adjustments only by rate change or write-off: §10.3 (ADR-023, ADR-010, ADR-025).
 - Allocation is oldest-outstanding-first; advance credit is derived and logged: §10.3 (ADR-020, ADR-021).
-- Month boundaries use the organization timezone: §10.4 (ADR-028).
+- Month boundaries use the business timezone: §10.4 (ADR-028).
 - Privacy boundary is the tenancy; other rooms see aggregates by default; enforced server-side: §9 (ADR-008, ADR-011).
 - Shared, generated, room-scoped access codes with DB-backed rate limiting and expiring sessions; closed tenancies lose access: §8.2 (ADR-009, ADR-026).
 - Utility providers and import profiles are system-wide registries (ADR-016); the standard amount is organization-wide (`04-database.md` §6.4).
