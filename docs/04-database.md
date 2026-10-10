@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.6.0`
+Version: `0.7.0`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Added `admin_session` and `admin_login_attempt` (admin auth storage) and registered them in the ER diagram, index list, and retention/mutability lists.
+Changes in this version: Enumerations are TEXT + CHECK on both engines (§4); four inline value sets now constrained; §13 item 3 resolved by 09 §14.
 
 ---
 
@@ -83,7 +83,7 @@ Every persisted table that stores a monetary amount carries a `currency CHAR(3) 
 
 ## 4. Enumerations
 
-These may be implemented as database enums or lookup tables. The values are the contract.
+Every enumeration is a TEXT column with a CHECK constraint listing the allowed values, on both SQLite and PostgreSQL. Native database enum types and lookup tables are not used in the MVP: behavior is identical on both engines, no extra tables are needed, and adding a value is one migration that replaces the constraint. Columns whose allowed values are listed inline in §6 follow the same rule. The values are the contract.
 
 ### tenancy_status
 
@@ -477,7 +477,12 @@ Notes:
 | created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | | |
 
-Unique constraint: `UNIQUE (tenancy_id, billing_month)`.
+Constraints:
+
+```text
+UNIQUE (tenancy_id, billing_month)
+CHECK (decision IN ('bill', 'skip'))
+```
 
 Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemption (`skip`). The lazy generator consults this table before creating a bill. This is a bill/skip decision only; it never changes a bill amount. Amount changes are limited to recorded rate-change adjustments and write-offs (see `bill_adjustment`).
 
@@ -643,6 +648,12 @@ Why this table exists:
 | internal_reason | TEXT | | Admin-only |
 | admin_id | UUID | FK → admin_user, NOT NULL | |
 | created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+CHECK (adjustment_type IN ('rate_change', 'write_off'))
+```
 
 Notes:
 - Append-oriented. Multiple adjustments produce multiple rows.
@@ -828,6 +839,7 @@ Constraints:
 
 ```text
 CHECK (row_category IN ('tenant_payment','utility_bill_payment'))
+CHECK (parse_status IN ('valid','duplicate','invalid','unrecognized'))
 ```
 
 Notes:
@@ -884,6 +896,12 @@ Notes:
 | entity_id | UUID | | |
 | metadata | JSONB | | Structured context |
 | created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+CHECK (actor_type IN ('admin','system','tenant_session'))
+```
 
 Notes:
 - Append-oriented. No `updated_at`. No deletion in normal operation.
@@ -1151,6 +1169,7 @@ This classification covers every table specified in Section 6.
 1. Should reports use plain queries or a dedicated read model/view in MVP?
 2. What is the retention window for `staged_import_row` after commit?
 3. Should expired/revoked `tenant_session` rows be pruned automatically, and how often?
+   Decision: Pruned opportunistically during login requests (09 §14).
 4. Is a partial unique index acceptable on the target free Postgres host for the statement fingerprint and active-tenancy rules?
    Decision: Acceptable. The hosting provider must support partial unique indexes (03 §6.4); SQLite local development uses sqlite_where, PostgreSQL uses postgresql_where.
 5. Should `sender_alias.normalized_name` normalization rules be enforced in the database or only in the application layer?
