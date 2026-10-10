@@ -1,12 +1,12 @@
 # Deployment
 
 Document: `docs/10-deployment.md`
-Version: `0.1.0`
+Version: `0.1.1`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Initial version: MVP hosting choice, known limitations, backup and portability rules.
+Changes in this version: Backups are encrypted; static host must serve the app and API from one origin; security open items added. Portability rules match the one-origin setup.
 
 ---
 
@@ -39,7 +39,7 @@ Checked 2026-10-10. Re-verify before deployment.
 3. The Neon Free restore window is 6 hours and is not a backup (§6).
 4. Free tiers carry no uptime guarantee.
 
-Frontend handling (implementation note): on page load, send one request to a lightweight health endpoint that runs `SELECT 1`; show a "waking up the server" message after about 3 seconds without a response; use a first-call timeout of 90 seconds or more and retry on timeouts and gateway errors; submit buttons show a connecting state. No timer-based pings.
+Frontend handling (implementation note): on page load, send one request to a lightweight health endpoint that runs `SELECT 1`; show a "waking up the server" message after about 3 seconds without a response; use a first-call timeout of 90 seconds or more and retry on timeouts and gateway errors; submit buttons show a connecting state. No timer-based pings. A proxy in front of a sleeping backend may return a gateway timeout for the first request; the retry rule above covers this.
 
 ## 5. Exit triggers
 
@@ -54,13 +54,15 @@ Move to a paid option when users or the admin complain about the wake-up delay, 
 - A restore into a fresh PostgreSQL, followed by the app's tests, is rehearsed before launch and after any provider change.
 - This is separate from the admin full export (03), which stays an application feature.
 - PDFs are never retained (constitution 1.2.1), so no file backup is needed.
+- Backups are encrypted before they leave the host; encryption keys are stored separately from the backup files; restore tests use an isolated database (09 §13).
 
 ## 7. Portability rules
 
 1. Standard PostgreSQL only: no provider-specific features (branching, platform APIs, persistent disks).
-2. Provider-specific values come from settings and environment (`DATABASE_URL`, CORS origins, secrets), never from code.
+2. Provider-specific values come from settings and environment (`DATABASE_URL`, the static host's API proxy target, secrets), never from code.
 3. Schema changes go through Alembic migrations only.
-4. Moving provider means: restore the latest dump into the new PostgreSQL, set the environment values, update CORS and the frontend API URL. Rehearse once before launch.
+4. Moving provider means: restore the latest dump into the new PostgreSQL, set the environment values, update the static host's `/api/*` proxy target (and the allowed origins if CORS is ever enabled). Rehearse once before launch.
+5. The browser sees one origin: the static host proxies `/api/*` to the backend, so session cookies are same-origin (09 §5). Fallback if no free static host can do this: the backend serves the built frontend, and the page then also waits for a cold start.
 
 ## 8. Open items before deployment
 
@@ -71,3 +73,6 @@ Move to a paid option when users or the admin complain about the wake-up delay, 
 - Re-verify the provider terms in §3.
 - Admin 'last exported' warning threshold (03 §18 item 4).
 - Static frontend host.
+- Static host must proxy `/api/*` and pass Set-Cookie; compare its proxy timeout with the Render wake-up time.
+- Application database role, owner role and grants (09 §11).
+- Admin session and login-attempt storage (04, via 09 §5 and §6).

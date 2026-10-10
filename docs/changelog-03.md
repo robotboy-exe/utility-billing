@@ -42,3 +42,5 @@ Version 0.9.1 registers ADR-028 in the document-set index, mirrors the ADR-022 c
 Version 0.9.2 retitles ADR-002 to Single-Organization MVP Scope and ADR-003 to Hosting Provider Independence, and marks ADR-001 and ADR-007 revised to realign stale Context/Consequences wording with the single-organization, no-background-jobs MVP.
 
 Version 0.10.0 records the MVP hosting choice (Render + Neon, Oracle VM fallback) and registers 10-deployment.md; selection criteria unchanged.
+
+Version 0.10.1 registers 09-security.md and resolves the §8.2 rate-limit and session-default confirmations.

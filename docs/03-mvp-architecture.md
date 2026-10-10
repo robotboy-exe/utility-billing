@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.0`
+Version: `0.10.1`
 Status: Consolidated source of truth
 Last Updated: 2026-10-10
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
@@ -689,8 +689,8 @@ The MVP uses a simplified auth model. Detailed session and credential schemas ar
 - **Shared tenancy code:** Each tenancy has one shared access code. Roommates may use it concurrently; sessions are per device.
 - **Generation:** The server generates the code. The admin cannot choose it. Minimum 40 bits of entropy (for example 8 characters from a 32-character alphabet without look-alike characters). Stored hashed with the same password-hashing function as admin passwords.
 - **Login is scoped:** The tenant selects their room, then enters the code. The server resolves the room's active tenancy and verifies the code against that tenancy only. Codes are never assumed unique and never looked up globally. Failures return one generic error.
-- **Rate limiting:** Stored in the database (not in process memory), because free hosts restart, sleep and may run more than one instance. Counted per tenancy and per source IP. Initial defaults: 5 failed attempts per tenancy per 15 minutes then a 15-minute lockout; per-IP limit counted separately so one IP cannot lock out every tenancy. Admin can see lockouts and reset the code. Confirm thresholds in `09-security.md`.
-- **Sessions:** Random token of at least 128 bits, hashed at rest, fixed absolute expiry (initial default 30 days, no sliding extension). After expiry the tenant re-enters the code. Confirm in `09-security.md`.
+- **Rate limiting:** Stored in the database (not in process memory), because free hosts restart, sleep and may run more than one instance. Counted per tenancy and per source IP. Initial defaults: 5 failed attempts per tenancy per 15 minutes then a 15-minute lockout; per-IP limit counted separately so one IP cannot lock out every tenancy. Admin can see lockouts and reset the code. Thresholds are set in `09-security.md`.
+- **Sessions:** Random token of at least 128 bits, hashed at rest, fixed absolute expiry (initial default 30 days, no sliding extension). After expiry the tenant re-enters the code. Set in `09-security.md`.
 - **Delivery:** Admin shares the code out-of-band (for example WhatsApp or SMS).
 - **Revocation:** Resetting the code invalidates all existing sessions. Closing a tenancy permanently deactivates its credential, with no historical access restoration.
 
@@ -819,7 +819,7 @@ Does not reconcile tenant balances.
 - **Money Handling:** Single currency. All amounts stored as `BIGINT` minor units (e.g., ₦1,000 = 100000). No floating-point math.
 - **Immutability:** Financial records are append-only; the authoritative table list is `04-database.md` §11.1. Corrections use reversal/correction records, never silent rewrites.
 - **Auditability:** Lightweight, append-only audit log for admin/system actions. Commission data is never logged. Tenants do not see the audit log.
-- *Detailed security implementations will belong in the planned `09-security.md` (see Section 17).*
+- *Detailed security implementations are in `09-security.md` (see Section 17).*
 
 ---
 
@@ -978,13 +978,8 @@ docs/
 
 Document status:
 
-- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `10-deployment.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-028).
-- Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, `07`–`09`, and `11`–`12`.
-
-The most important remaining documents are:
-
-`09-security.md`
-Authentication, authorization, session handling and tenant visibility policy. The access code requirements in §8.2 are the MVP minimum; `09` may tighten them and fixes the rate-limit and session defaults.
+- Written: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, and `docs/adr/` (ADR-001 through ADR-028).
+- Not yet written: `00-project-overview.md`, `01-ai-development-guide.md`, `02-requirements.md`, `07`–`08`, and `11`–`12`.
 
 ---
 
@@ -994,7 +989,7 @@ The following items should be resolved before implementation of the relevant mod
 
 1. Which free hosting provider will be used? Resolved: the MVP choice is Render + Neon with an Oracle VM fallback (`10-deployment.md` §2).
 2. Is the Payvice Avantus export format stable across billing-software versions?
-3. Do the initial rate-limit and session-lifetime defaults in §8.2 hold up? Confirm in `09-security.md`.
+3. Do the initial rate-limit and session-lifetime defaults in §8.2 hold up? Resolved: confirmed in `09-security.md` §5 and §6.
 4. What "last exported" warning threshold applies? Set in `10-deployment.md`.
 
 Resolved or relocated items:
