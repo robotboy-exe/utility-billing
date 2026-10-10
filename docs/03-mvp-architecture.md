@@ -1,7 +1,7 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.1`
+Version: `0.10.2`
 Status: Consolidated source of truth
 Last Updated: 2026-10-10
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
@@ -673,7 +673,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 
 *Detailed schema, constraints, indexes, and exact field definitions are specified in `04-database.md`.*
 
-This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `tenant_login_attempt`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
+This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `admin_session`, `tenant_login_attempt`, `admin_login_attempt`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
 
 ---
 

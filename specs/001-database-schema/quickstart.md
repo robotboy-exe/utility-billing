@@ -35,7 +35,7 @@ DATABASE_URL=postgresql+psycopg://... pytest   # production engine smoke + invar
 ```
 
 ### 1. Fresh schema + reversibility (SC-005, SC-007)
-- Apply `upgrade head` from empty → no errors; all 26 tables, indexes, and constraints exist (list in [data-model.md](data-model.md)).
+- Apply `upgrade head` from empty → no errors; all 28 tables, indexes, and constraints exist (list in [data-model.md](data-model.md)).
 - `alembic downgrade base` then `upgrade head` again → clean, seed-free, no errors.
 - Structural equivalence (SC-007): assert the table/column/constraint set matches on SQLite and PostgreSQL. **PostgreSQL side is deferred to CI/deploy** (no local Postgres).
 

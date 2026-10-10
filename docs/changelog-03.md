@@ -44,3 +44,5 @@ Version 0.9.2 retitles ADR-002 to Single-Organization MVP Scope and ADR-003 to H
 Version 0.10.0 records the MVP hosting choice (Render + Neon, Oracle VM fallback) and registers 10-deployment.md; selection criteria unchanged.
 
 Version 0.10.1 registers 09-security.md and resolves the §8.2 rate-limit and session-default confirmations.
+
+Version 0.10.2 adds admin_session and admin_login_attempt to the table lists and counts.

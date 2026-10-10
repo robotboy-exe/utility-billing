@@ -1,12 +1,12 @@
 # Deployment
 
 Document: `docs/10-deployment.md`
-Version: `0.1.1`
+Version: `0.1.2`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Backups are encrypted; static host must serve the app and API from one origin; security open items added. Portability rules match the one-origin setup.
+Changes in this version: Admin session and login-attempt storage recorded in 04; corresponding open item removed.
 
 ---
 
@@ -75,4 +75,3 @@ Move to a paid option when users or the admin complain about the wake-up delay, 
 - Static frontend host.
 - Static host must proxy `/api/*` and pass Set-Cookie; compare its proxy timeout with the Render wake-up time.
 - Application database role, owner role and grants (09 §11).
-- Admin session and login-attempt storage (04, via 09 §5 and §6).

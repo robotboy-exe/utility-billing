@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.5.3`
+Version: `0.6.0`
 Status: Draft — design phase
-Last Updated: 2026-10-09
+Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: §13 item 4 resolved — partial unique indexes are acceptable: the hosting provider must support them (03 §6.4), using `sqlite_where` for SQLite local development and `postgresql_where` for PostgreSQL.
+Changes in this version: Added `admin_session` and `admin_login_attempt` (admin auth storage) and registered them in the ER diagram, index list, and retention/mutability lists.
 
 ---
 
@@ -185,6 +185,10 @@ AdminUser ─── Organization
                   ├── StandardAmountChange
                   ├── PortalSetting
                   └── AuditLog
+
+AdminUser
+     ├──< AdminSession
+     └──< AdminLoginAttempt
 ```
 
 ---
@@ -263,6 +267,36 @@ Notes:
 
 ---
 
+#### admin_session
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| admin_user_id | UUID | FK → admin_user, NOT NULL | |
+| token_hash | TEXT | NOT NULL | Hashed session token |
+| device_info | TEXT | | Optional user-agent/device hint |
+| issued_at | timestamptz | NOT NULL | |
+| expires_at | timestamptz | NOT NULL | |
+| revoked_at | timestamptz | | Set on revocation |
+| created_at | timestamptz | NOT NULL | |
+
+Validity rule:
+
+```text
+session is valid when:
+  revoked_at IS NULL
+  AND expires_at > now()
+  AND admin_user.is_active = true
+```
+
+Notes:
+- Multiple concurrent sessions per admin are allowed (multiple rows).
+- Interactive session; revoked on logout, password change or reset, and admin deactivation.
+- `expires_at` is fixed at issuance and never extended on use. The validity rule checks `expires_at > now()`; it never slides the expiry forward.
+- Session lifetime (e.g. 24-hour sessions) is application configuration, not schema.
+
+---
+
 #### tenant_login_attempt
 
 | Column | Type | Constraints | Notes |
@@ -279,6 +313,26 @@ Notes:
 - Operational, prunable table backing rate limiting. Rate limiting is stored in the database, not process memory, because free hosts restart (ADR-012).
 - Thresholds (e.g. 5 failures per 15 minutes, 15-minute lockout) are application configuration, not schema.
 - An attempt against an unknown room is recorded with `tenancy_id` null.
+- Not a financial table; never part of the append-only list (see Section 11.6).
+
+---
+
+#### admin_login_attempt
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Org-scoped for rate limiting |
+| admin_user_id | UUID | FK → admin_user | Nullable; an attempt against an unknown admin has none |
+| source_ip | TEXT | | Client IP |
+| attempted_at | timestamptz | NOT NULL | UTC |
+| succeeded | BOOLEAN | NOT NULL | |
+| created_at | timestamptz | NOT NULL | |
+
+Notes:
+- Operational, prunable table backing admin rate limiting. Rate limiting is stored in the database, not process memory, because free hosts restart (ADR-012).
+- Thresholds (e.g. 10 failures per 15 minutes, 15-minute lockout) are application configuration, not schema.
+- An attempt against an unknown admin is recorded with `admin_user_id` null.
 - Not a financial table; never part of the append-only list (see Section 11.6).
 
 ---
@@ -979,6 +1033,8 @@ Recommended indexes beyond primary keys and unique constraints.
 | import_batch | (statement_fingerprint) | Duplicate statement detection |
 | tenant_login_attempt | (tenancy_id, attempted_at) | Tenancy-scoped login-attempt history |
 | tenant_login_attempt | (source_ip, attempted_at) | IP-scoped rate limiting |
+| admin_login_attempt | (admin_user_id, attempted_at) | Admin-scoped login-attempt history |
+| admin_login_attempt | (source_ip, attempted_at) | IP-scoped admin rate limiting |
 
 ---
 
@@ -1051,7 +1107,7 @@ These may be updated normally:
 - tenant_access_credential (rotation)
 - admin_user
 
-This list equals exactly the tables carrying `updated_at`. Three write-once operational tables are excluded: `tenant_session`, `staged_import_row`, and `tenant_login_attempt`. `tenant_session` and `staged_import_row` are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits; `tenant_login_attempt` is write-once, prunable operational data for rate limiting. All three are governed by Sections 11.3, 11.4 and 11.6. `tenant_login_attempt` is operational, prunable data; it is not a financial table and is not part of immutable financial history.
+This list equals exactly the tables carrying `updated_at`. Five write-once operational tables are excluded: `tenant_session`, `admin_session`, `staged_import_row`, `tenant_login_attempt`, and `admin_login_attempt`. `tenant_session`, `admin_session` and `staged_import_row` are opened once and closed via semantic fields (`revoked_at`, `committed_transaction_id`) rather than in-place edits; `tenant_login_attempt` and `admin_login_attempt` are write-once, prunable operational data for rate limiting. All five are governed by Sections 11.3, 11.4 and 11.6. `tenant_login_attempt` and `admin_login_attempt` are operational, prunable data; they are not financial tables and are not part of immutable financial history.
 
 ### 11.3 Staged row retention
 
@@ -1059,7 +1115,7 @@ After an import batch is committed, `staged_import_row` entries may be pruned af
 
 ### 11.4 Session retention
 
-Expired or revoked `tenant_session` rows may be pruned periodically. `tenant_session` is operational/ephemeral data, not financial history.
+Expired or revoked `tenant_session` and `admin_session` rows may be pruned periodically. They are operational/ephemeral data, not financial history.
 
 ### 11.5 Commission data
 
@@ -1067,7 +1123,7 @@ Commission data is never stored anywhere and therefore has no retention concern.
 
 ### 11.6 Login-attempt retention
 
-`tenant_login_attempt` rows may be pruned periodically. Login attempts are operational/ephemeral rate-limiting data, not financial history.
+`tenant_login_attempt` and `admin_login_attempt` rows may be pruned periodically. Login attempts are operational/ephemeral rate-limiting data, not financial history.
 
 This classification covers every table specified in Section 6.
 

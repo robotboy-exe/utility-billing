@@ -8,7 +8,7 @@
 
 **Immutable (append-only, `created_at` only)**: `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`.
 **Mutable (`updated_at`)**: `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `monthly_bill`, `billing_config`, `billing_override`, `portal_setting`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `utility_provider`, `tenant_access_credential`, `admin_user`.
-**Write-once operational (no `updated_at`; closed via semantic field or write-once, prunable)**: `tenant_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`), `tenant_login_attempt` (write-once, prunable rate-limiting history).
+**Write-once operational (no `updated_at`; closed via semantic field or write-once, prunable)**: `tenant_session` (`revoked_at`), `admin_session` (`revoked_at`), `staged_import_row` (`committed_transaction_id`), `tenant_login_attempt` (write-once, prunable rate-limiting history), `admin_login_attempt` (write-once, prunable rate-limiting history).
 
 ---
 
@@ -32,11 +32,23 @@ Read-only session token snapshot for the tenant portal.
 - Validity rule (derived): `revoked_at IS NULL AND expires_at > now() AND credential_version = credential.credential_version AND credential.is_active = true`.
 - Notes: multiple concurrent sessions allowed; closed via `revoked_at` (no in-place edits). `expires_at` is fixed at issuance and never extended on use. Session lifetime (e.g. 30 days) is application configuration, not schema.
 
+### admin_session (write-once operational)
+Interactive session token snapshot for the admin.
+- Fields: `id`, `admin_user_id` (FK→admin_user NOT NULL), `token_hash` (TEXT NOT NULL), `device_info` (TEXT), `issued_at`, `expires_at`, `revoked_at`, `created_at`.
+- Validity rule (derived): `revoked_at IS NULL AND expires_at > now() AND admin_user.is_active = true`.
+- Notes: multiple concurrent sessions allowed; closed via `revoked_at` (no in-place edits). Revoked on logout, password change or reset, and admin deactivation. `expires_at` is fixed at issuance and never extended on use. Session lifetime (e.g. 24 hours) is application configuration, not schema.
+
 ### tenant_login_attempt (write-once operational)
 Rate-limiting history for tenant access-code attempts. Operational, prunable; never financial.
 - Fields: `id`, `organization_id` (FK→organization NOT NULL, org-scoped), `tenancy_id` (FK→tenancy, nullable — null when the room is unknown), `source_ip` (TEXT), `attempted_at` (timestamptz, UTC), `succeeded` (BOOLEAN NOT NULL), `created_at`.
 - Indexes: `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)`.
 - Notes: stored in the database so rate limiting survives free-host restarts; thresholds (e.g. 5 failures / 15 min, 15-min lockout) are application configuration, not schema.
+
+### admin_login_attempt (write-once operational)
+Rate-limiting history for admin sign-in attempts. Operational, prunable; never financial.
+- Fields: `id`, `organization_id` (FK→organization NOT NULL, org-scoped), `admin_user_id` (FK→admin_user, nullable — null when the admin is unknown), `source_ip` (TEXT), `attempted_at` (timestamptz, UTC), `succeeded` (BOOLEAN NOT NULL), `created_at`.
+- Indexes: `(admin_user_id, attempted_at)`, `(source_ip, attempted_at)`.
+- Notes: stored in the database so rate limiting survives free-host restarts; thresholds (e.g. 10 failures / 15 min, 15-min lockout) are application configuration, not schema.
 
 ---
 
@@ -191,4 +203,4 @@ Append-only admin/system action record. `id`, `organization_id` FK, `actor_type`
 
 ## Indexes (`docs/04` §9)
 
-Applied as documented: transaction `(organization_id, transaction_date)`, `(tenancy_id)`, `(import_batch_id)`, `(record_category)`; monthly_bill `(billing_month)`, `(organization_id, billing_month)`; payment_allocation `(transaction_id)`, `(monthly_bill_id)`; advance_movement `(transaction_id)`, `(tenancy_id, occurred_at)`; utility_bill_payment `(provider_id, spend_month)`, `(organization_id, spend_month)`; sender_alias `(organization_id, normalized_name)`; staged_import_row `(import_batch_id)`; audit_log `(organization_id, created_at)`, `(entity_type, entity_id)`; import_batch `(statement_fingerprint)`; tenant_login_attempt `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)`.
+Applied as documented: transaction `(organization_id, transaction_date)`, `(tenancy_id)`, `(import_batch_id)`, `(record_category)`; monthly_bill `(billing_month)`, `(organization_id, billing_month)`; payment_allocation `(transaction_id)`, `(monthly_bill_id)`; advance_movement `(transaction_id)`, `(tenancy_id, occurred_at)`; utility_bill_payment `(provider_id, spend_month)`, `(organization_id, spend_month)`; sender_alias `(organization_id, normalized_name)`; staged_import_row `(import_batch_id)`; audit_log `(organization_id, created_at)`, `(entity_type, entity_id)`; import_batch `(statement_fingerprint)`; tenant_login_attempt `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)`; admin_login_attempt `(admin_user_id, attempted_at)`, `(source_ip, attempted_at)`.

@@ -30,7 +30,7 @@ Implement the complete database layer for the Utility Billing MVP as SQLAlchemy 
 
 **Constraints**: Free hosting (no workers/schedulers); money as `BIGINT` minor units + `currency CHAR(3)` (no floats); append-only financial tables; org-scoped queries; PostgreSQL/SQLite parity except two documented divergences (R-4 partial indexes, R-5 immutable triggers)
 
-**Scale/Scope**: Single org MVP; 26 tables + seed
+**Scale/Scope**: Single org MVP; 28 tables + seed
 
 ## Constitution Check
 
@@ -77,7 +77,7 @@ backend/
 └── src/
     ├── models/            # SQLAlchemy models, grouped by domain (mirrors docs/04 §6)
     │   ├── base.py        # mixins: IdCreatedAt, OrgScoped, UpdatedAt; money()/currency() helpers
-    │   ├── identity.py    # admin_user, tenant_access_credential, tenant_session
+    │   ├── identity.py    # admin_user, tenant_access_credential, tenant_session, admin_session, tenant_login_attempt, admin_login_attempt
     │   ├── org.py         # organization, property, room
     │   ├── tenancy.py     # tenancy, tenant, sender_alias
     │   ├── billing_config.py # billing_config, billing_override, standard_amount_change

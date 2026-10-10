@@ -1,12 +1,12 @@
 # Security
 
 Document: `docs/09-security.md`
-Version: `0.1.0`
+Version: `0.1.1`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`, `10-deployment.md`
 
-Changes in this version: Initial version: authentication, sessions, rate limiting, browser and upload hardening, database, backup and logging rules, deferred items.
+Changes in this version: Admin attempt storage resolved: `admin_login_attempt` (04); §18 open item removed.
 
 ---
 
@@ -60,7 +60,7 @@ Database-backed (not in process memory), counted by subject:
 - Tenant, per tenancy: 5 failures per 15 minutes, then a 15-minute lockout (ADR-009; initial default confirmed).
 - Tenant, per source IP: 20 failures per 15 minutes, then a 15-minute lockout (initial default). Deliberately looser than the per-tenancy limit because mobile networks may put many users behind one IP.
 - Organization-wide: if tenant login failures exceed 100 per 15 minutes, add a 2-second delay to every tenant login. This slows an attack and never blocks legitimate logins (initial default).
-- Admin, per source IP: 10 failures per 15 minutes, then a 15-minute lockout; the organization-wide delay rule also applies to admin logins (initial defaults). Where admin attempts are stored is decided in 04.
+- Admin, per source IP: 10 failures per 15 minutes, then a 15-minute lockout; the organization-wide delay rule also applies to admin logins (initial defaults). Admin attempts are stored in `admin_login_attempt` (04).
 - A lockout returns a generic "try again later" response. The admin can see lockouts and reset a tenancy's code at any time (03 §8.2), which bounds a deliberate-lockout attack.
 - IPv6 addresses are counted per /64.
 - The limiter is generic over its subject, so new limits are configuration.
@@ -138,7 +138,6 @@ Names, rooms and payment records are personal data. Before launch, with Nigerian
 
 ## 18. Open items before deployment
 
-- `admin_session` table shape and admin login-attempt storage (04).
 - Benchmark Argon2id on the deployed instance and set the hashing concurrency.
 - Verify forwarding headers and trusted hop count on Render and the static host (§7).
 - Verify that the static host's proxy forwards cookies, and compare its timeout with Render's wake-up time.

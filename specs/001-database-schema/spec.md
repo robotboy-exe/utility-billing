@@ -22,7 +22,7 @@ A fresh deployment begins by establishing the structural and identity tables on 
 
 **Acceptance Scenarios**:
 
-1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `admin_user`, `tenant_access_credential`, `tenant_session`, and `tenant_login_attempt` all exist with UUID primary keys and `created_at` timestamps.
+1. **Given** the schema is applied to a fresh database, **When** the org-hierarchy and identity tables are inspected, **Then** `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `admin_user`, `tenant_access_credential`, `tenant_session`, `admin_session`, `tenant_login_attempt`, and `admin_login_attempt` all exist with UUID primary keys and `created_at` timestamps.
 2. **Given** one active tenancy for a room, **When** an administrator attempts to open a second active tenancy for the same room, **Then** the schema rejects it (partial unique index on active tenancy per room).
 3. **Given** a tenancy with a sender alias, **When** a duplicate normalized sender name is added for that tenancy, **Then** it is rejected by the `(tenancy_id, normalized_name)` uniqueness rule.
 4. **Given** an active access credential, **When** it is rotated, **Then** the stored version increments and previously issued sessions no longer satisfy the validity rule.
@@ -140,7 +140,7 @@ The operational wrapper that makes the schema usable across environments: one re
 
 ### Functional Requirements
 
-- **FR-001**: System MUST persist every entity specified in `docs/04` §6 — `admin_user`, `tenant_access_credential`, `tenant_session`, `tenant_login_attempt`, `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `billing_config`, `billing_override`, `standard_amount_change`, `transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `utility_provider`, `utility_bill_payment`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `staged_import_row`, `portal_setting`, and `audit_log` — with the columns, types, and nullability in `docs/04` §6.
+- **FR-001**: System MUST persist every entity specified in `docs/04` §6 — `admin_user`, `tenant_access_credential`, `tenant_session`, `admin_session`, `tenant_login_attempt`, `admin_login_attempt`, `organization`, `property`, `room`, `tenancy`, `tenant`, `sender_alias`, `billing_config`, `billing_override`, `standard_amount_change`, `transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `utility_provider`, `utility_bill_payment`, `import_profile`, `import_channel_category_mapping`, `import_batch`, `staged_import_row`, `portal_setting`, and `audit_log` — with the columns, types, and nullability in `docs/04` §6.
 - **FR-002**: System MUST use UUID primary keys on every table.
 - **FR-003**: System MUST store every monetary amount as an integer minor-unit (`BIGINT`) value with an explicit `currency CHAR(3)` column, with no floating-point storage, across all money-bearing tables (constitution Principle I).
 - **FR-004**: System MUST scope financial and structural queries by `organization_id` (and `property_id` / `tenancy_id` where relevant); key financial tables MUST carry `organization_id` (constitution Database & Schema).
@@ -161,8 +161,8 @@ The operational wrapper that makes the schema usable across environments: one re
 - **organization**: Root isolation boundary; owns users, properties, and all scoped financial records.
 - **property / room**: Physical hierarchy; a room persists across tenancies with one active tenancy.
 - **tenancy / tenant / sender_alias**: Occupancy period and privacy boundary (tenancy); namespace for matched sender names used in `tenant_payment` matching.
-- **admin_user / tenant_access_credential / tenant_session**: Identity and authentication; hashed credentials, versioned for revocation, sessions with validity rules.
-- **tenant_login_attempt**: Operational, prunable rate-limiting history keyed by tenancy and source IP; never part of financial history.
+- **admin_user / tenant_access_credential / tenant_session / admin_session**: Identity and authentication; hashed credentials, versioned for revocation, sessions with validity rules.
+- **tenant_login_attempt / admin_login_attempt**: Operational, prunable rate-limiting history keyed by tenancy or admin account and source IP; never part of financial history.
 - **billing_config / billing_override / standard_amount_change**: Org-wide standard amount, per-tenancy/month bill-or-skip decisions, and append-only rate-change history.
 - **transaction**: Normalized source row (tenant_payment or utility_bill_payment), append-only, with duplicate key.
 - **monthly_bill**: Per-tenancy/month billing state snapshotting the standard amount.

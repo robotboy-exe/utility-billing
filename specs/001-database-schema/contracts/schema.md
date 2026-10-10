@@ -49,6 +49,7 @@ Each implemented as a Python `enum.StrEnum`; DB enforcement via `CHECK` (R-1).
 | admin_user | `email` UNIQUE | One login identity |
 | tenant_access_credential | `tenancy_id` UNIQUE | One credential per tenancy; the hash itself is NOT unique — codes are verified by tenancy + code, never globally |
 | tenant_login_attempt | indexes `(tenancy_id, attempted_at)`, `(source_ip, attempted_at)` | Operational rate-limiting history; prunable, never financial |
+| admin_login_attempt | indexes `(admin_user_id, attempted_at)`, `(source_ip, attempted_at)` | Operational rate-limiting history; prunable, never financial |
 | sender_alias | `(tenancy_id, normalized_name)` UNIQUE | No duplicate normalized sender |
 | billing_override | `(tenancy_id, billing_month)` UNIQUE | One bill/skip decision per tenancy-month |
 | monthly_bill | `(tenancy_id, billing_month)` UNIQUE | One bill per tenancy per month (I-6) |
