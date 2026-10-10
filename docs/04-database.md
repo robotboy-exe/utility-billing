@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.7.0`
+Version: `0.8.0`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Enumerations are TEXT + CHECK on both engines (§4); four inline value sets now constrained; §13 item 3 resolved by 09 §14.
+Changes in this version: billing_config: one org-wide row enforced by a partial unique index.
 
 ---
 
@@ -456,8 +456,15 @@ UNIQUE (tenancy_id, normalized_name)
 | updated_at | timestamptz | NOT NULL | |
 | updated_by_admin_id | UUID | FK → admin_user | |
 
+Constraints:
+
+```text
+UNIQUE (organization_id) WHERE property_id IS NULL
+```
+
 Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
+- One org-wide default row per organization, enforced by the partial unique index above; per-property uniqueness is added when per-property amounts are introduced.
 - The standard amount is organization-wide and uniform across rooms. When describing the standard amount, "global" in the ADRs means org-wide; when describing utility providers and import profiles, "global" means system-wide.
 - Bills snapshot the standard amount at generation time. Changing this value does not silently rewrite existing bills; already-generated, unsettled current-month bills are adjusted only via recorded `bill_adjustment` rows, while settled bills and past months are never adjusted.
 
@@ -1023,6 +1030,7 @@ Some invariants span rows and are enforced in the service layer inside database 
 7. **Bill amount changes are audited.** Any change to `monthly_bill.final_amount_minor` must have a corresponding `bill_adjustment` row.
 8. **Advance movements are atomic with allocations.** An `applied` advance movement and its allocation are written in the same transaction.
 9. **Organization scoping.** All scoped queries must filter by `organization_id`.
+10. **One org-wide billing_config per organization.** At most one `billing_config` row with `property_id` null per organization, enforced by a partial unique index.
 
 ---
 
@@ -1049,6 +1057,7 @@ Recommended indexes beyond primary keys and unique constraints.
 | audit_log | (organization_id, created_at) | Audit queries |
 | audit_log | (entity_type, entity_id) | Entity history |
 | import_batch | (statement_fingerprint) | Duplicate statement detection |
+| billing_config | (organization_id) WHERE property_id IS NULL | One org-wide default per organization |
 | tenant_login_attempt | (tenancy_id, attempted_at) | Tenancy-scoped login-attempt history |
 | tenant_login_attempt | (source_ip, attempted_at) | IP-scoped rate limiting |
 | admin_login_attempt | (admin_user_id, attempted_at) | Admin-scoped login-attempt history |
@@ -1170,7 +1179,7 @@ This classification covers every table specified in Section 6.
 2. What is the retention window for `staged_import_row` after commit?
 3. Should expired/revoked `tenant_session` rows be pruned automatically, and how often?
    Decision: Pruned opportunistically during login requests (09 §14).
-4. Is a partial unique index acceptable on the target free Postgres host for the statement fingerprint and active-tenancy rules?
+4. Is a partial unique index acceptable on the target free Postgres host for the statement fingerprint, active-tenancy, and org-wide billing_config rules?
    Decision: Acceptable. The hosting provider must support partial unique indexes (03 §6.4); SQLite local development uses sqlite_where, PostgreSQL uses postgresql_where.
 5. Should `sender_alias.normalized_name` normalization rules be enforced in the database or only in the application layer?
 6. How often should the advance reconciliation invariant be checked (on every allocation, on demand, or as a periodic audit report)?
