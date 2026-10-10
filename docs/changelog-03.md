@@ -46,3 +46,5 @@ Version 0.10.0 records the MVP hosting choice (Render + Neon, Oracle VM fallback
 Version 0.10.1 registers 09-security.md and resolves the §8.2 rate-limit and session-default confirmations.
 
 Version 0.10.2 adds admin_session and admin_login_attempt to the table lists and counts.
+
+Version 0.10.3 reconciles §6.4, §8.2, §5.3 and wording with 09, 10 and the owning documents; no decisions change.

@@ -1,10 +1,10 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.2`
+Version: `0.10.3`
 Status: Consolidated source of truth
 Last Updated: 2026-10-10
-Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `changelog-03.md`
+Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, `changelog-03.md`
 
 ---
 
@@ -158,7 +158,7 @@ Rules:
 Purpose:
 
 - Record payments made to utility providers.
-- Provide month-bounded utility spend reporting.
+- Provide a month-bounded provider spend report.
 - Serve as proof-of-payment records.
 
 Source in MVP:
@@ -169,7 +169,7 @@ Rules:
 
 - Utility payments do not settle tenant bills.
 - Utility payments do not enter tenancy matching.
-- Reporting is bounded by the payment's calendar month in the business timezone (section 10.4).
+- Reporting is bounded by the payment's calendar month in the organization timezone (section 10.4).
 - Future utility providers are registry-driven.
 
 ### 3.3 Ledger separation
@@ -206,13 +206,13 @@ The MVP includes:
   - Property-level billing information.
   - Full details of the tenant's own tenancy/room.
   - Property-level utility spend records.
-- Automatic rolling monthly bill generation using a standard monthly amount.
+- Automatic rolling monthly bill generation using a standard amount.
 - Rate-change-driven bill adjustments and debt write-offs.
 - Public visibility of bill adjustments.
 - PDF statement import from the Payvice Avantus billing software (primary transaction source).
 - Manual transaction entry (also the fallback for failed or blocked imports).
 - Utility provider registry with BEDC as the first provider.
-- Utility bill payment recording and month-bounded spend reporting.
+- Utility bill payment recording and a month-bounded provider spend report.
 - Basic audit logging.
 - Admin full-data export with a "last exported" indicator (§5.3).
 - Free-hosting-friendly deployment.
@@ -235,7 +235,7 @@ The following are deferred:
 - Full tenant account management.
 - Tenant self-registration.
 - Tenant password management.
-- Individual tenant credentials, unless added later by a future ADR.
+- Individual tenant access codes, unless added later by a future ADR.
 - Automated bank reconciliation.
 
 ### 4.3 Future Architectural Considerations
@@ -254,7 +254,6 @@ The architecture should leave room for:
 - Advanced reporting.
 - Subscription billing.
 - Role-based access control.
-- Dedicated customer environments (§14.4).
 
 These features should not be implemented merely because the architecture allows them.
 
@@ -287,7 +286,7 @@ The MVP must therefore be designed as follows:
 
 | Constraint | MVP design response |
 |---|---|
-| No reliable background jobs | Imports and matching are manually triggered by the admin. Bill generation is lazy/rolling and happens synchronously in response to real usage, so no background worker is needed. |
+| No reliable background jobs | Imports run when the admin uploads and confirms a batch, and matching runs automatically on that confirm (alias-driven; manual matching is only a fallback). Bill generation is lazy/rolling and happens synchronously in response to real usage, so no background worker is needed. |
 | No reliable scheduled tasks | Monthly bills are generated lazily/on-demand the first time the system needs them (admin dashboard load, payment allocation, import batch confirm, admin report requests), not by a scheduled task. |
 | Ephemeral filesystem | Do not rely on uploaded files remaining on the server. Store normalized transaction records in the database. |
 | Limited database storage | Keep financial records normalized and compact. Avoid storing original statement files unless explicitly required. |
@@ -301,19 +300,21 @@ The MVP must therefore be designed as follows:
 
 Lazy generation (ADR-022) is one function with one contract. Detailed bill rules are in `05-billing-engine.md`.
 
-- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active tenancy for each month up to and including `month`. `month` is computed in the business timezone (§10.4). It consults `billing_override` (bill/skip decisions, ADR-024) before creating a bill.
+- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active tenancy for each month up to and including `month`. `month` is computed in the organization timezone (§10.4). It consults `billing_override` (bill/skip decisions, ADR-024) before creating a bill.
 - **Idempotent by construction.** Creation is `INSERT ... ON CONFLICT (tenancy_id, billing_month) DO NOTHING`, backed by the unique constraint in `04-database.md`. Calling it twice, or concurrently, yields the same bills.
-- **Explicit callers.** Admin dashboard load, payment allocation, import batch confirm, and admin report requests. Nothing else calls it.
-- **Not callers.** The tenant portal and any request authenticated only by a tenant session (read-only, ADR-009). The portal reads existing bills and shows an "as of" date, so its figures can lag a month rollover until the next admin action.
+- **Callers.** Admin dashboard load, payment allocation, import batch confirm, and admin report requests. Nothing else calls it (ADR-022).
+- **Not callers.** Tenant-session requests, including the tenant portal, are not callers (read-only, ADR-009). The portal reads existing bills and shows an "as of" date, so its figures can lag a month rollover until the next admin action.
 - **Transactions and locking.** Allocation and batch confirm each run in one database transaction. Inside it: call `ensure_bills_through`; for batch confirm, lock the `import_batch` row first and re-check its status so a double-click cannot confirm twice; lock affected tenancies in ascending id order, then each tenancy's open bills `FOR UPDATE` ordered by `billing_month`; write allocations and advance movements in the same transaction. Any failure rolls the whole unit back.
+
+*Owned by ADR-022 and `05-billing-engine.md` §6.9.*
 
 ### 5.3 Backup strategy
 
 Free database tiers can pause, expire or lose data, and ADR-012 retains no files. Export is therefore the backup, and it is an MVP requirement.
 
-- **Full export.** Admin-triggered, produces one JSON file containing all organization-scoped records (properties, rooms, tenancies, tenants, sender aliases, transactions, monthly bills, allocations, advance movements, adjustments, utility bill payments, import batch metadata, audit log). Per-table CSV is an optional convenience, not a substitute.
+- **Full export.** Admin-triggered, produces one JSON file containing all organization-scoped records (the authoritative table list is in `04-database.md` §6; credential material and commissions are excluded). Per-table CSV is an optional convenience, not a substitute.
 - **Exclusions.** Credential material is never exported: admin password hashes, access code hashes, session token hashes. Commission data does not exist to export (ADR-019).
-- **"Last exported" indicator.** The admin dashboard shows the time of the last successful full export and warns when none exists or it is older than a threshold set in `10-deployment.md`.
+- **"Last exported" indicator.** The admin dashboard shows the time of the last successful full export and warns when none exists or it is older than the threshold in `10-deployment.md` §6.
 - **Restore.** A documented restore procedure belongs in `10-deployment.md`; an export that has never been test-restored is not a backup.
 - **Source PDFs are not retained** (ADR-012, ADR-014, ADR-019: a retained PDF would hold commission rows). Each `import_batch` records the file's SHA-256, filename and page count instead, so the admin can show that a re-presented file is the same one that was imported, without keeping it. The batch fields are specified in `04-database.md`.
 
@@ -410,7 +411,7 @@ The exact provider is recorded below, but the MVP should fit this general shape:
 
 The business logic must remain independent of the selected hosting provider.
 
-**Provider selection is resolved:** the MVP choice is Render + Neon with an Oracle VM fallback, recorded in `10-deployment.md` §2. It meets the selection criteria: the database must not pause, expire or be deleted for inactivity or after a trial period; the backend must tolerate cold starts; the database must support the partial unique indexes and row-level locking this design uses (`04-database.md` open question 4); and the admin must be able to export and restore data (§5.3).
+**Provider selection is resolved:** the MVP choice is Render + Neon with an Oracle VM fallback, recorded in `10-deployment.md` §2. It meets the selection criteria: the database must not require a manual restart, must not expire or be deleted for inactivity or after a trial period, and may suspend compute and resume automatically on the next request (such as Neon's compute suspend); the backend must tolerate cold starts; the database must support the partial unique indexes and row-level locking this design uses (`04-database.md` §13 item 4); and the admin must be able to export and restore data (§5.3).
 
 ### 6.5 System Context
 
@@ -418,8 +419,8 @@ At a high level:
 
 ```text
                    ┌─────────────────────┐
-                   │      Landlord       │
-                   │       / User        │
+                   │    Landlord or      │
+                   │  Property manager   │
                    └──────────┬──────────┘
                               │
                               ▼
@@ -544,7 +545,7 @@ Reports should derive their data from authoritative records rather than maintain
 
 Responsible for:
 
-- Organization-wide standard utility bill amount (uniform across rooms; not system-wide).
+- Organization-wide standard amount (uniform across rooms; not system-wide).
 - Application configuration.
 - Import profiles.
 - Administrative operations.
@@ -554,7 +555,7 @@ Responsible for:
 Responsible for:
 
 - User authentication.
-- Sessions/tokens.
+- Sessions.
 - Organization membership.
 - Roles and permissions.
 
@@ -634,6 +635,7 @@ The Billing Engine must not depend on:
 - FastAPI request handlers.
 - PDF extraction or any other parser.
 - Any payment provider or bank API.
+- The database ORM (SQLAlchemy).
 
 The Billing Engine should operate on domain-level data.
 
@@ -686,11 +688,11 @@ The MVP uses a simplified auth model. Detailed session and credential schemas ar
 
 **8.2 Tenant Portal Access (MVP requirements, ADR-009, ADR-026)**
 - **No full user management:** Tenants have no passwords, profiles or individual logins.
-- **Shared tenancy code:** Each tenancy has one shared access code. Roommates may use it concurrently; sessions are per device.
-- **Generation:** The server generates the code. The admin cannot choose it. Minimum 40 bits of entropy (for example 8 characters from a 32-character alphabet without look-alike characters). Stored hashed with the same password-hashing function as admin passwords.
+- **Shared access code:** Each tenancy has one shared access code. Roommates may use it concurrently; sessions are per device.
+- **Generation:** The server generates the code. The admin cannot choose it. Minimum 40 bits of entropy (for example 8 characters from a 32-character alphabet without look-alike characters; code length is configuration, not a fixed format, `04-database.md`). Stored hashed with the same password-hashing function as admin passwords.
 - **Login is scoped:** The tenant selects their room, then enters the code. The server resolves the room's active tenancy and verifies the code against that tenancy only. Codes are never assumed unique and never looked up globally. Failures return one generic error.
-- **Rate limiting:** Stored in the database (not in process memory), because free hosts restart, sleep and may run more than one instance. Counted per tenancy and per source IP. Initial defaults: 5 failed attempts per tenancy per 15 minutes then a 15-minute lockout; per-IP limit counted separately so one IP cannot lock out every tenancy. Admin can see lockouts and reset the code. Thresholds are set in `09-security.md`.
-- **Sessions:** Random token of at least 128 bits, hashed at rest, fixed absolute expiry (initial default 30 days, no sliding extension). After expiry the tenant re-enters the code. Set in `09-security.md`.
+- **Rate limiting:** Stored in the database (not in process memory), because free hosts restart, sleep and may run more than one instance. Counted per tenancy and per source IP, with the per-IP limit counted separately so one IP cannot lock out every tenancy. The thresholds are set in `09-security.md` §6. Admin can see lockouts and reset the code.
+- **Sessions:** Random token of at least 128 bits, hashed at rest, fixed absolute expiry with no sliding extension. After expiry the tenant re-enters the code. The lifetime is set in `09-security.md` §5.
 - **Delivery:** Admin shares the code out-of-band (for example WhatsApp or SMS).
 - **Revocation:** Resetting the code invalidates all existing sessions. Closing a tenancy permanently deactivates its credential, with no historical access restoration.
 
@@ -700,7 +702,7 @@ The MVP uses a simplified auth model. Detailed session and credential schemas ar
 Visibility is a policy concern enforced server-side. The frontend must not be trusted to hide data. Configuration is stored in the `portal_setting` table (see `04-database.md`).
 
 **9.1 Privacy Boundary**
-The privacy boundary is the **tenancy**. Members of the same tenancy see full details. Members of other tenancies see property-level aggregates only by default (ADR-008). Tenants cannot see other properties. Admin sees everything.
+The privacy boundary is the **tenancy**. Members of the same tenancy see full details. Members of other tenancies see property-level aggregates and org-wide rate-change notices by default (ADR-008). Tenants cannot see other properties. Admin sees everything.
 
 **9.2 Visibility Matrix**
 The values below are the MVP **default policy**. The policy is configurable at organization or property scope through `portal_setting` (see `04-database.md` §6.8, ADR-008, ADR-011); the keys listed there are examples, not an exhaustive mapping of every cell. Enforcement is always server-side.
@@ -711,7 +713,7 @@ Default rationale: in a small property a room label identifies a person, so per-
 |---|---|---|---|---|
 | Property/Room list & names | Visible | Visible | Hidden | Visible |
 | Property aggregates (total outstanding debt, fully-paid room count and ratio; ADR-027) | Visible | Visible | Hidden | Visible |
-| Room billing amount/status | Visible | Hidden by default; opt-in | Hidden | Visible |
+| Room billing amount/status | Visible | Hidden by default; admin opt-in | Hidden | Visible |
 | Room bill adjustment notice | Visible | Org-wide rate-change notices visible; room-specific adjustments and write-offs hidden | Hidden | Visible |
 | Property utility spend | Visible | Visible | Hidden | Visible |
 | Tenants & contact details | Visible | Hidden | Hidden | Visible |
@@ -729,7 +731,7 @@ Two-ledger rules: §3 (ADR-017).
 
 **10.1 Transaction Ingestion (Summary)**
 - **Sources:** Payvice Avantus PDF, text-based only, no OCR (ADR-014), plus manual entry. No other sources in the MVP.
-- **Flow:** Upload/Parse -> Staged Batch -> Admin Preview -> Confirm.
+- **Flow:** Upload/Parse -> Staged Batch -> Admin Preview -> Confirm or Reject.
 - **Category mapping:** Configuration-driven (ADR-015). `FUNDING` = tenant payment; `BEDC` = utility payment; `COMMISSION` = discarded.
 - **Commission rows:** Never persisted, displayed, counted or logged (ADR-019). The parser may recognize them transiently, in memory, only to validate the statement's control totals.
 - **Control totals fail closed:** The parser recomputes totals from parsed rows and compares them with the statement footer. A mismatch, or a missing footer, blocks confirmation of the batch; the admin re-uploads or falls back to manual entry. Only `totals_status` is persisted. Footer totals include commissions and are not stored.
@@ -738,7 +740,7 @@ Two-ledger rules: §3 (ADR-017).
 
 **10.2 Matching**
 - Only `tenant_payment` rows enter matching (primarily via normalized sender aliases).
-- `utility_bill_payment` rows bypass matching and go to provider spend reporting.
+- `utility_bill_payment` rows bypass matching and go to the provider spend report.
 
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Lazy and rolling through `ensure_bills_through` (§5.2.1, ADR-022).
@@ -749,11 +751,13 @@ Two-ledger rules: §3 (ADR-017).
 - **Allocation:** Oldest-outstanding-first (ADR-020); overpayment becomes advance credit; advance balance is derived and every movement is logged and reconciled (ADR-021).
 - *Algorithms, edge cases and corrections are in `05-billing-engine.md`.*
 
-**10.4 Business timezone (ADR-028)**
+**10.4 Organization timezone (ADR-028)**
 - Each organization has one IANA timezone, default `Africa/Lagos` (UTC+1, no daylight saving).
 - All calendar-month boundaries use it: `billing_month`, "current month", the month `ensure_bills_through` generates through, and the grouping of utility spend.
 - Instants are stored as `timestamptz` (UTC). Statement timestamps carry no offset and are interpreted in the organization timezone.
 - One timezone per organization in the MVP, not per property.
+
+*Owned by ADR-028 and `04-database.md`.*
 
 ---
 
@@ -802,7 +806,7 @@ My Room / My Tenancy view:
 - Advance or outstanding balance.
 - Bill adjustment details.
 
-### 11.3 Utility spend report
+### 11.3 Provider spend report
 
 A separate report derived from the Utility Bill Payment Ledger.
 
@@ -819,7 +823,7 @@ Does not reconcile tenant balances.
 - **Money Handling:** Single currency. All amounts stored as `BIGINT` minor units (e.g., ₦1,000 = 100000). No floating-point math.
 - **Immutability:** Financial records are append-only; the authoritative table list is `04-database.md` §11.1. Corrections use reversal/correction records, never silent rewrites.
 - **Auditability:** Lightweight, append-only audit log for admin/system actions. Commission data is never logged. Tenants do not see the audit log.
-- *Detailed security implementations are in `09-security.md` (see Section 17).*
+- *Detailed security implementations are in `09-security.md`.*
 
 ---
 
@@ -856,7 +860,7 @@ The deployment must support:
 - Database migrations.
 - API/backend connectivity.
 - Reasonable upload limits.
-- Session/token handling.
+- Session handling.
 
 The deployment should avoid requiring:
 
@@ -872,7 +876,7 @@ Business logic must not depend on the chosen free host. The application should r
 
 ### 14.4 Single-organization MVP, SaaS later
 
-The MVP serves one organization and is org-scoped by design: every record carries `organization_id` and every query path filters by it. A dedicated deployment for one customer is possible because the application is config-driven; self-hosting is not a goal. Multi-organization SaaS is deferred and would additionally need self-serve onboarding, multi-user roles, subscription billing, isolation tests or Postgres row-level security, and no single-organization assumptions in code (for example, nothing may rely on tenant access codes being unique across organizations; login is room-scoped, §8.2). See ADR-002 and ADR-003.
+The MVP serves one organization and is org-scoped by design: every record carries `organization_id` and every query path filters by it. A dedicated deployment for one organization is possible because the application is config-driven; self-hosting is not a goal. Multi-organization SaaS is deferred and would additionally need self-serve onboarding, multi-user roles, subscription billing, isolation tests or Postgres row-level security, and no single-organization assumptions in code (for example, nothing may rely on tenant access codes being unique across organizations; login is room-scoped, §8.2). See ADR-002 and ADR-003.
 
 ### 14.5 Scalability Strategy
 
@@ -888,14 +892,14 @@ Application Server
 PostgreSQL
 ```
 
-Scale horizontally only when actual usage requires it. Potential future additions: multiple application instances, managed PostgreSQL, background job workers, queue infrastructure, object storage.
+Scale horizontally only when actual usage requires it. Potential future additions: multiple application instances, a larger or paid managed PostgreSQL plan, background job workers, queue infrastructure, object storage.
 
 ### 14.6 Deferred integrations
 
 Paystack and Monnify webhooks and direct bank APIs are deferred (ADR-006). They need no design in the MVP, and the MVP deployment must not require webhook endpoints. Any future integration must keep these invariants:
 
 - Verified: the sender is authenticated (for example, signature check) before anything is stored.
-- Idempotent and retry-safe: reuse the duplicate-detection model of `06-transaction-ingestion.md` §18 (row-level duplicate key and statement fingerprint) so a redelivered event cannot create a second transaction.
+- Idempotent and retry-safe: reuse the row-level duplicate key of `06-transaction-ingestion.md` §18 so a redelivered event cannot create a second transaction.
 - Normalized through the Transaction Source Abstraction (ADR-004) like any other source.
 - Billing logic stays independent of where ingestion runs (ADR-007).
 
@@ -990,7 +994,7 @@ The following items should be resolved before implementation of the relevant mod
 1. Which free hosting provider will be used? Resolved: the MVP choice is Render + Neon with an Oracle VM fallback (`10-deployment.md` §2).
 2. Is the Payvice Avantus export format stable across billing-software versions?
 3. Do the initial rate-limit and session-lifetime defaults in §8.2 hold up? Resolved: confirmed in `09-security.md` §5 and §6.
-4. What "last exported" warning threshold applies? Set in `10-deployment.md`.
+4. What "last exported" warning threshold applies? Resolved: set in `10-deployment.md` §6.
 
 Resolved or relocated items:
 
@@ -1019,6 +1023,6 @@ A checklist of the rules above; each item is defined in the cited section.
 - Month boundaries use the organization timezone: §10.4 (ADR-028).
 - Privacy boundary is the tenancy; other rooms see aggregates by default; enforced server-side: §9 (ADR-008, ADR-011).
 - Shared, generated, room-scoped access codes with DB-backed rate limiting and expiring sessions; closed tenancies lose access: §8.2 (ADR-009, ADR-026).
-- Utility providers and import profiles are global registries (ADR-016); the standard amount is organization-wide.
+- Utility providers and import profiles are system-wide registries (ADR-016); the standard amount is organization-wide (`04-database.md` §6.4).
 - Free-tier compatible: no cron, workers, webhooks or persistent local files; export is the backup: §5.3 (ADR-012).
 - Every query path filters by `organization_id`: §12, §14.4.

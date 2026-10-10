@@ -1,12 +1,12 @@
 # Security
 
 Document: `docs/09-security.md`
-Version: `0.1.1`
+Version: `0.1.2`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`, `10-deployment.md`
 
-Changes in this version: Admin attempt storage resolved: `admin_login_attempt` (04); §18 open item removed.
+Changes in this version: PDF size and page limits now point to `06-transaction-ingestion.md` §3.4; this document owns the processing-time and memory limits.
 
 ---
 
@@ -90,7 +90,7 @@ Database-backed (not in process memory), counted by subject:
 
 Applies to the synchronous statement import (ADR-012, 06):
 
-- Enforce a maximum upload size before the whole body is buffered, a maximum page count, and a processing time limit. Initial defaults: 10 MB, 100 pages, 30 seconds. Tune against real statements.
+- Enforce a maximum upload size before the whole body is buffered, a maximum page count, and a processing time limit. The size and page limits are those in `06-transaction-ingestion.md` §3.4; this document adds the processing-time and memory limits (processing-time initial default 30 seconds). Tune against real statements.
 - Validate the PDF signature and structure; never trust the file extension or the declared content type. Reject encrypted and malformed PDFs with a clear error.
 - Never execute embedded content. Run the parser with a memory cap below the instance limit, in a separate process if the chosen library supports it.
 - PDFs are never retained (constitution 1.2.1); only the hash and metadata are stored.

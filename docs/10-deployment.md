@@ -1,12 +1,12 @@
 # Deployment
 
 Document: `docs/10-deployment.md`
-Version: `0.1.2`
+Version: `0.2.0`
 Status: Draft — design phase
 Last Updated: 2026-10-10
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Admin session and login-attempt storage recorded in 04; corresponding open item removed.
+Changes in this version: The admin full-export last-export warning threshold is set (7 days, a setting); the open item is removed.
 
 ---
 
@@ -53,6 +53,7 @@ Move to a paid option when users or the admin complain about the wake-up delay, 
 - Use a direct (non-pooled) connection for `pg_dump` and migrations (verify against Neon's documentation).
 - A restore into a fresh PostgreSQL, followed by the app's tests, is rehearsed before launch and after any provider change.
 - This is separate from the admin full export (03), which stays an application feature.
+- The admin dashboard warns when the last full export is older than 7 days (initial default; a setting) (03 §5.3, §18 item 4).
 - PDFs are never retained (constitution 1.2.1), so no file backup is needed.
 - Backups are encrypted before they leave the host; encryption keys are stored separately from the backup files; restore tests use an isolated database (09 §13).
 
@@ -71,7 +72,6 @@ Move to a paid option when users or the admin complain about the wake-up delay, 
 - Time the first request after 10 idle minutes on the deployed setup and record it here.
 - A dedicated Oracle VM for the fallback is not yet available.
 - Re-verify the provider terms in §3.
-- Admin 'last exported' warning threshold (03 §18 item 4).
 - Static frontend host.
 - Static host must proxy `/api/*` and pass Set-Cookie; compare its proxy timeout with the Render wake-up time.
 - Application database role, owner role and grants (09 §11).
