@@ -27,6 +27,12 @@ ADRs are unversioned. Superseded ADRs are frozen; any other ADR may be revised i
 
 ## Stack & conventions
 - Already decided (03 §6): React + TypeScript + Vite frontend (no authoritative financial logic), Python + FastAPI + SQLAlchemy backend, PostgreSQL prod / SQLite local, Alembic migrations. Commissions fully discarded; lazy/rolling bill generation; free-tier hosting (no workers/schedulers).
-- Commits use conventional prefixes (`docs:`, `chore:`); work happens on `dev`.
+- Commits use conventional prefixes (`docs:`, `feat:`, `fix:`, `test:`, `chore:`); work happens on `dev`.
 
 End every completed task with a plain-language summary of what changed and what is still open.
+
+## Running tests
+- Run tests from the repository root with the project virtual environment: `.venv/bin/python -m pytest tests -q`. Use the default in-memory SQLite database; never point tests at `utility_billing_dev.db`.
+- While working on a task, run only that task's tests (`.venv/bin/python -m pytest tests/<file>::<test> -q`). Run the full suite only at a story checkpoint.
+- Before marking a task `[x]` in tasks.md, run its tests and show the command and its result. If any test fails, stop and report it: do not mark the task done and do not edit unrelated code.
+- Never delete or weaken a test to make it pass.
