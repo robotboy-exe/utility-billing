@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Full MVP Database Schema
+# Specification Quality Checklist: Database Schema Foundation
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: 2026-09-21
+**Created**: 2026-10-10
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -32,7 +32,9 @@
 ## Notes
 
 - Validation result: **PASS** (0 open items, 0 unresolved clarifications).
-- Framing note (accepted exception for "No implementation details"): this feature delivers the database schema itself, and the data-access layer + migration tooling (SQLAlchemy, Alembic) are already-locked architecture decisions (`docs/03` §6.6, constitution Database & Schema). Tech references therefore reflect decided constraints, not new implementation detail; success criteria remain technology-agnostic. Documented in Assumptions.
-- Decision (per `docs/03` §6.7 review): one integrated spec, organized by domain module, rather than multiple sub-feature specs — `docs/04` §8 cross-table invariants and FK chains make the schema a single cohesive artifact.
-- `docs/04` §13 open questions deferred to Assumptions as out-of-scope for schema creation.
+- Accepted exception for "No implementation details" / "technology-agnostic": this feature delivers the database schema itself, and the data layer + migration tooling (SQLAlchemy, Alembic) are already-locked architecture decisions (`docs/03` §6.6, constitution Database & Schema). The success criteria explicitly require the partial unique indexes (04 §13 item 4) to hold on both SQLite and PostgreSQL, so those engine names are stated criteria, not new implementation detail. Recorded in Assumptions.
+- Requirements reference `docs/04` by section (e.g. §6.5, §6.7, §11.1) instead of restating column definitions, so the schema stays maintained in one place.
+- User stories are ordered in dependency order (identity → tenancy → ingestion → ledgers → settings → audit/security → seed → migration) and each is independently testable.
+- Success criteria are directly checkable by tests: table count (28), constraints enforced (including partial unique indexes on SQLite and PostgreSQL), immutable tables reject UPDATE/DELETE, money as integer minor units, timestamps in UTC.
+- The spec's Open Questions section has one open question (the remaining `04` §13 items) plus two resolved pointers (`04` §4 enumerations; `04` §6 inline value sets). These are non-blocking and surfaced per the "list as an open question instead of deciding" instruction, not as `[NEEDS CLARIFICATION]` markers.
 - Items marked incomplete require spec updates before `/speckit.clarify` or `/speckit.plan`.

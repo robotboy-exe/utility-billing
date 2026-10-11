@@ -1,87 +1,93 @@
 # Research: Full MVP Database Schema (Phase 0)
 
-**Feature**: `002`-scoped no — `001-database-schema` | **Date**: 2026-09-21 | **Spec**: [spec.md](spec.md)
+**Feature**: `001-database-schema` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
 
-This document resolves the unknowns listed in Technical Context (plan.md) for implementing the full schema from `docs/04-database.md` as SQLAlchemy models + Alembic migrations, with PostgreSQL for production and SQLite for local development/testing. Every decision is grounded in `docs/04`, the ratified constitution, and the locked ADRs.
+This document resolves the Technical Context unknowns for implementing the schema defined in `docs/04-database.md` as SQLAlchemy 2.x models plus a single reversible Alembic baseline, targeting **PostgreSQL (production/CI)** and **SQLite (local/tests)**. `docs/04` is the only definition of tables and columns; this document records *how* the schema is expressed, not *what* the schema is.
 
-**Locked execution decisions (2026-09-21)**:
-- **First implementation pass = User Story 1 only** (Structural & Identity Foundation), per tasks.md MVP strategy.
-- **SQLite is the only engine validated locally** (no local PostgreSQL on the dev machine). Postgres-native DDL (immutable triggers, `postgresql_where` partial unique indexes) is authored in the code but **validated in CI/deploy**, not locally. All decisions below are therefore phrased so the SQLite path is locally runnable and complete for US1.
+**Scope guard**: no API, UI, or auth logic ships in this feature (`docs/04` §1, §12; spec FR-025). Every decision below is about the persistence layer only.
 
----
+## Required decisions
 
-## R-1: Enum strategy
+Each item below was called out in the plan input and records a one-line rationale plus the cost of changing the decision later.
 
-- **Question**: Native database `ENUM` vs lookup tables vs VARCHAR + CHECK? (`docs/04` §4 says "database enums or lookup tables; the values are the contract.")
-- **Decision**: Implement each enum as a Python `enum.StrEnum` and a SQLAlchemy `Enum(EnumClass, native_enum=False, ...)` column — i.e. a `VARCHAR` column backed by a `CHECK` constraint listing the values.
-- **Rationale**: SQLite has no native enums; `native_enum=False` yields portable VARCHAR + CHECK on both engines. It also avoids Postgres `ENUM` type-locking concerns on production tables (`docs/04` §12). The values remain a hard contract via both the Python enum and the CHECK.
-- **Alternatives considered**: Native PG `ENUM` (locks on alter, no SQLite parity); lookup tables (extra joins, no benefit for closed value sets).
+### R-1 — Enumerations are TEXT + CHECK
 
-## R-2: UUID primary keys
+- **Decision**: Every enumeration is a `TEXT` column with a `CHECK` constraint listing the allowed values, on both SQLite and PostgreSQL, including the four inline value sets in `docs/04` §6 (`billing_override.decision`, `bill_adjustment.adjustment_type`, `staged_import_row.parse_status`, `audit_log.actor_type`).
+- **Rationale**: identical behavior on both engines, no lookup tables, no native-enum type lock-in; the values are the contract (`docs/04` §4).
+- **Cost of changing later**: every enum-bearing table and its CHECK must migrate on both engines, and any already-stored value must be remapped; adding one value is one constraint-replacement migration per enum.
+- **Alternatives considered**: native PostgreSQL `ENUM` (engine-locked, no SQLite parity, `ALTER TYPE` locking); lookup tables (extra joins for closed sets).
 
-- **Question**: How are UUID PKs defaulted given Postgres (`gen_random_uuid()`) vs SQLite (none)?
-- **Decision**: Use SQLAlchemy `Uuid` (or `postgresql.UUID`-compatible portable type) with an **application-side** `default=uuid.uuid4`. No reliance on a server-side default.
-- **Rationale**: Every write path goes through the ORM, so an app-side default is sufficient and identical on both engines. Server-side default would diverge (Postgres has `gen_random_uuid()`, SQLite does not).
-- **Alternatives considered**: `server_default=text("gen_random_uuid()")` on Postgres only (breaks parity and dual source of default).
+### R-2 — One shared UTC-aware datetime column type
 
-## R-3: JSONB and timestamp parity
+- **Decision**: a single shared `TypeDecorator` over `DateTime(timezone=True)` is used by **every** `*_at` timestamp column; on bind it coerces to timezone-aware UTC, and on result it returns a timezone-aware UTC datetime.
+- **Rationale**: SQLite round-trips timestamps naively, so a stray naive value would raise on comparison with an aware one; one shared type makes that impossible and keeps all instants UTC (`docs/04` §3.2, ADR-028).
+- **Cost of changing later**: touches every timestamp column and every persisted instant; needs a migration rewriting the column type/values on both engines and re-validation of the month-boundary computations.
+- **Alternatives considered**: raw `DateTime(timezone=True)` per column (SQLite returns naive → comparison bugs); naive-UTC columns with ad-hoc handling at call sites (leaks across the codebase).
 
-- **Question**: `docs/04` uses `JSONB` and `timestamptz` (Postgres-native) but must also run on SQLite.
-- **Decision**: Use SQLAlchemy `JSON` for the three config/metadata JSONB columns (`import_profile.detection_config|parse_config|file_limits`, `import_batch.ignored_summary`, `audit_log.metadata`) and `DateTime(timezone=True)` for all `*_at` columns.
-- **Rationale**: `sa.JSON` renders as `JSONB` on Postgres and JSON text on SQLite automatically; `DateTime(timezone=True)` renders `TIMESTAMPTZ` on Postgres and timezone-aware datetime on SQLite. Parity with no custom DDL branching.
-- **Alternatives considered**: Hand-rolled JSONB branch per engine (unnecessary; SQLAlchemy handles it).
+### R-3 — Money as integer minor units via shared helpers
 
-## R-4: Partial unique index portability (active tenancy, statement fingerprint)
+- **Decision**: every monetary value is an integer `BIGINT` minor unit built through a shared `money()` column helper (per-column CHECK `>= 0` or `> 0` exactly as `docs/04` states) with an adjacent shared `currency()` helper (`CHAR(3) NOT NULL`, default the MVP currency).
+- **Rationale**: turns `docs/04` §3.4–§3.5 and constitution Principle I into one reusable pattern, so no float can enter any money column.
+- **Cost of changing later**: every money-bearing table, its CHECK, and its currency column migrate together; a change to the magnitude/rounding semantics also requires a data conversion.
+- **Alternatives considered**: hand-authored `BIGINT` per column (drift and omission risk); a custom Money type (over-abstraction for the MVP).
 
-- **Question**: `docs/04` §8.5 (`UNIQUE (room_id) WHERE status='active'`) and §10.2 (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`) require **partial** unique indexes, which SQLite does not support (`docs/04` §13 Q4).
-- **Decision**: 
-  - **Postgres**: real partial unique indexes via `postgresql_where=...` on `UniqueConstraint`/`Index`.
-  - **SQLite**: no partial index; enforce the identical invariants in the **application/service layer** and cover them in tests.
-- **Rationale**: Postgres gets native integrity (the production DB is the source of truth per constitution); SQLite is dev-only and the invariant is still guaranteed by app-layer checks + tests. This matches `docs/04` §8's stance that row-spanning invariants are enforced in the service layer within transactions.
-- **Alternatives considered**: Composite `(room_id, status)` unique index (rejects multiple closed historical tenancies — incorrect); giving up the invariant on SQLite (unacceptable).
-- **Divergence note**: Recorded in `contracts/schema.md` and `quickstart.md`; invariants are tested equivalently on both engines. PostgreSQL partial indexes are authored in the code now but exercised in CI/deploy (no local Postgres).
+### R-4 — Partial unique indexes declared for both engines
 
-## R-5: Immutable (append-only) table write enforcement
+- **Decision**: partial unique indexes are declared with **both** `sqlite_where` and `postgresql_where` — `tenancy` (`UNIQUE (room_id) WHERE status = 'active'`; `docs/04` §6.3, §8.5), `import_batch` (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`; `docs/04` §6.7, §10.2), and `billing_config` (`UNIQUE (organization_id) WHERE property_id IS NULL`; `docs/04` §6.4). All three are registered in `docs/04` §9 and §13 item 4, which specify `sqlite_where` locally and `postgresql_where` in production.
+- **Rationale**: SQLite has supported partial indexes since 3.8.0, so both engines enforce the invariants natively and they are verifiable locally, replacing the earlier PostgreSQL-only/app-layer divergence.
+- **Cost of changing later**: drop and recreate the indexes on both engines and re-verify; any stopgap app-layer guard must be removed.
+- **Alternatives considered**: PostgreSQL-only partial index plus a SQLite application-layer guard (weaker, service-layer tested only — the previous approach); a composite `(room_id, status)` index (wrongly blocks historical closed tenancies).
 
-- **Question**: How do the 7 immutable financial tables (`transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`) reject in-place UPDATE/DELETE (spec SC-002)?
-- **Decision**: **Postgres** `BEFORE UPDATE` / `BEFORE DELETE` triggers (raise exception) on the immutable tables; **SQLite** relies on application-layer guards plus tests asserting no ORM UPDATE/DELETE path exists. Postgres triggers are authored now but validated in CI/deploy (not locally).
-- **Rationale**: Satisfies SC-002's "reject at the storage layer" literally on production Postgres while keeping SQLite simple. Append-only is a policy enforced by schema; corrections go through reversal/correction rows (`docs/04` §11.1, constitution Principle I).
-- **Alternatives considered**: App-layer only (fails SC-002 "storage layer" wording); SQLite triggers too (optional — kept app-layer for simplicity; documented).
+### R-5 — Immutable tables blocked by triggers on both engines from one shared DDL
 
-## R-6: Seed data mechanism
+- **Decision**: the seven immutable tables (`docs/04` §11.1 — `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`) are protected against in-place `UPDATE`/`DELETE` by database triggers on **both** engines, and the trigger DDL is defined **once** in a shared helper that is emitted both by SQLAlchemy events during `metadata.create_all()` and by the Alembic baseline migration, so tests and migrations cannot differ.
+- **Feasibility**: **feasible.** SQLite uses `CREATE TRIGGER ... BEFORE UPDATE/DELETE ... BEGIN SELECT RAISE(ABORT, '...'); END;`. PostgreSQL uses one shared `CREATE OR REPLACE FUNCTION` returning `trigger` plus per-table `CREATE TRIGGER ... EXECUTE FUNCTION`. Both forms are produced by the same Python helper, branched by dialect.
+- **Rationale**: a single DDL source means the SQLite triggers exercised by tests and the PostgreSQL triggers applied by the migration are literally the same definition (`docs/04` §11.1; constitution Principle I; spec FR-016, SC-003).
+- **Cost of changing later**: triggers must be dropped/recreated in a migration; editing the guard means editing the shared DDL and re-running both paths; a future per-table mutable exception requires parameterizing the helper.
+- **Alternatives considered (kept on record; not needed because the approach is feasible)**: (1) PostgreSQL-only triggers + SQLite application-layer guards — would let tests pass without database enforcement locally; (2) ORM `before_update`/`before_delete` event guards only — bypassable by raw SQL, weaker than "database level"; (3) a trigger script run outside both paths — creates exactly the tests-vs-migrations drift the input forbids.
 
-- **Question**: How to deliver MVP seed (`docs/04` §12): default org, admin, global `PAYVICE_AVANTUS` profile + channel/category mappings, global `BEDC` provider, default org-wide `billing_config`, default portal settings?
-- **Decision**: A **separate idempotent seed step** (upsert keyed on natural identifiers), run after migrations, not baked into the Alembic migration.
-- **Rationale**: Keeps migrations pure, reversible DDL; seeding is idempotent (spec SC-006) and safe to re-run on existing DBs. The org-wide standard amount is admin-configurable and required before first lazy bill generation (`docs/04` §12).
-- **Alternatives considered**: Alembic data migration (mixes data with DDL, ties reversibility to data state); hybrid split (extra moving parts, no benefit for MVP).
+## Supporting decisions
 
-## R-7: Alembic migration packaging
+### R-6 — UUID primary keys
 
-- **Question**: One vs multiple migrations for a from-scratch schema.
-- **Decision**: **Single reversible baseline migration** creating all tables + indexes + triggers, respecting FK creation order, followed by the idempotent seed.
-- **Rationale**: Nothing is deployed yet; per-module migration splitting buys versioning ability only for an existing live schema (`docs/04` §12 ships every change as a migration going forward). One baseline keeps up/down deterministic (spec SC-005).
-- **Alternatives considered**: One-migration-per-domain (over-engineering pre-deployment; fragmentation for no benefit).
+- **Decision**: portable UUID PK type with an application-side `default=uuid.uuid4`; no server-side default.
+- **Rationale**: every write goes through the ORM, so one app-side default is identical on both engines; PostgreSQL has `gen_random_uuid()` but SQLite does not (`docs/04` §3.1).
+- **Alternatives considered**: server-side defaults per engine (dual source of truth, parity break).
 
-## R-8: Money and currency pattern
+### R-7 — JSON columns
 
-- **Question**: How to prevent float money and enforce the `_minor` + `currency CHAR(3)` convention (`docs/04` §3.4–§3.5)?
-- **Decision**: Provide shared column/value helpers — a `money` column factory (`sa.BigInteger` with `CHECK (x >= 0)` where doc says `>= 0`, or `> 0`) and a `currency` column factory (`sa.Char(3) NOT NULL`, default `"NGN"`) — applied to every money-bearing table so the convention is structural, not ad hoc.
-- **Rationale**: Converts a prose rule into a reusable, reviewable pattern (constitution Principle I). No floats anywhere.
-- **Alternatives considered**: Reproducing BIGINT by hand per column (drift risk); a full custom money type (over-abstraction for MVP).
+- **Decision**: `sqlalchemy.JSON` for the JSONB columns (`import_profile.detection_config|parse_config|file_limits`, `import_batch.ignored_summary`, `audit_log.metadata`).
+- **Rationale**: renders as `JSONB` on PostgreSQL and `JSON` text on SQLite with no custom DDL (`docs/04` §6.7, §6.9).
+- **Alternatives considered**: hand-rolled per-engine DDL (unnecessary).
 
-## R-9: Shared foundation & organization scoping
+### R-8 — Shared foundation and organization scoping
 
-- **Question**: How to enforce common columns (UUID PK, `organization_id` scoping, `created_at`/`updated_at`) consistently (`docs/04` §2, §3, §8.9)?
-- **Decision**: Define shared **mixin classes** — an `IdCreatedAtMixin` (id, created_at), an optional `OrgScopedMixin` (organization_id FK), and an `UpdatedAtMixin` (updated_at, applied only to mutable tables) — reused across models.
-- **Rationale**: Makes the §3 conventions and §8.9 (organization scoping on all scoped queries) structural and non-duplicative; matches the module boundaries in `docs/03` §6.7.
-- **Alternatives considered**: Hand-authoring columns per model (inconsistency/risk).
+- **Decision**: shared mixins — UUID PK + `created_at`; an optional `organization_id` FK mixin; and an `updated_at` mixin applied only to the mutable tables of `docs/04` §11.2. The shared UTC-aware type (R-2), `money()`/`currency()` (R-3), and the immutability-DDL registration (R-5) live in the same base module.
+- **Rationale**: makes `docs/04` §2/§3/§8.9 conventions structural and non-duplicative.
+- **Alternatives considered**: per-model hand-authoring (inconsistency).
 
-## R-10: Testing & DB isolation
+### R-9 — Seed data mechanism
 
-- **Question**: How to validate constraints per constitution Principle V (test-first financial logic)?
-- **Decision**: pytest suite with a fresh SQLite database per test (in-memory or tmp file); the same test suite can run against Postgres for a smoke/CI pass.
-- **Rationale**: SQLite runs the full suite locally/dev without a server; Postgres is validated in the deployment/CI path where the partial indexes and immutable triggers are real. All financial invariants (advance reconciliation, allocation cap, ledger separation) are covered by tests on both engines.
-- **Alternatives considered**: Postgres-only testing (not dev-friendly); manual verification (violates test-first).
+- **Decision**: an idempotent seed step (upsert keyed on natural identifiers), separate from the migration, delivering exactly the rows in `docs/04` §12.
+- **Rationale**: keeps migrations pure/reversible DDL; re-runnable without duplicates (spec SC-009).
+- **Alternatives considered**: data inside the baseline migration (ties reversibility to data state).
 
----
-**Result**: All Technical Context unknowns in plan.md are now resolved. No `NEEDS CLARIFICATION` remain.
+### R-10 — Migration packaging
+
+- **Decision**: one reversible baseline migration creating all 28 tables, constraints, indexes, partial unique indexes (R-4), and triggers (R-5), in FK creation order.
+- **Rationale**: nothing is deployed yet, so per-module splitting buys no benefit; one baseline keeps up/down deterministic (`docs/04` §12; `docs/03` §6.6).
+- **Alternatives considered**: one migration per domain (pre-deployment over-engineering).
+
+### R-11 — Testing and database isolation
+
+- **Decision**: `pytest` with a **fresh in-memory SQLite database per test** by default; the same suite can run against PostgreSQL in CI. Tests never point at the development database file (AGENTS.md).
+- **Rationale**: runs the full suite locally with no server; PostgreSQL is exercised in CI where the native triggers and partial indexes are applied by the migration.
+- **Alternatives considered**: PostgreSQL-only testing (not dev-friendly); manual verification (violates Principle V).
+
+## Libraries
+
+No library is required beyond those already in `backend/pyproject.toml`: SQLAlchemy 2.x, Alembic, psycopg (PostgreSQL), `tzdata`, pytest, pytest-sqlalchemy (dev: ruff, mypy, pre-commit). SQLite is stdlib. The SQLite and PostgreSQL trigger DDL (R-5) needs no additional dependency.
+
+## Open questions
+
+Anything still genuinely open lives in `docs/04` §13; this feature adds none.
