@@ -1,7 +1,7 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.9.1`
+Version: `0.10.0`
 Status: Draft — design phase
 Last Updated: 2026-10-15
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
