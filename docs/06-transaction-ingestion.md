@@ -1,12 +1,12 @@
 # Transaction Ingestion
 
 Document: `docs/06-transaction-ingestion.md`  
-Version: `0.3.2`  
+Version: `0.4.0`  
 Status: Draft — design phase  
-Last Updated: 2026-10-09  
+Last Updated: 2026-10-15  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `05-billing-engine.md`
 
-Changes in this version: Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
+Changes in this version: §24.2 unknown-channel rows are not staged; their details are kept in the batch's `unrecognized_rows` list for admin review (04 §6.7).
 
 ---
 
@@ -1075,7 +1075,7 @@ If a row cannot be parsed:
 If a channel is not recognized:
 
 - Mark row as unrecognized.
-- Do not persist it.
+- Do not stage it; keep its details in the batch's `unrecognized_rows` list for admin review.
 - Flag for admin review.
 
 Future channel mappings can be added through configuration.

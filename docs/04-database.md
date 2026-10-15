@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.9.0`
+Version: `0.9.1`
 Status: Draft — design phase
 Last Updated: 2026-10-15
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Matching recorded as append-only transaction_match rows; transaction no longer carries tenancy_id or matching_status; matching status derived; advance reconciliation scoped to actively matched payments.
+Changes in this version: Unrecognized rows (channel with no mapping) are no longer staged; their details are kept as a JSON list in the new nullable `import_batch.unrecognized_rows` (admin sees only `unrecognized_row_count` by default); `unrecognized` removed from `staged_import_row.parse_status` and its CHECK.
 
 ---
 
@@ -830,7 +830,8 @@ Notes:
 | utility_payment_total_minor | BIGINT | | Staged utility-payment amount total |
 | duplicate_row_count | INTEGER | | Rows skipped as duplicates |
 | invalid_row_count | INTEGER | | Rows marked invalid |
-| unrecognized_row_count | INTEGER | | Rows marked unrecognized |
+| unrecognized_row_count | INTEGER | | Rows whose channel has no mapping (not staged; details in `unrecognized_rows`) |
+| unrecognized_rows | JSONB | nullable | Details of rows whose channel has no mapping: row number, transaction date, channel, direction, amount_minor, description_raw |
 | uploaded_at | timestamptz | NOT NULL | |
 | confirmed_at | timestamptz | | |
 | created_at | timestamptz | NOT NULL | |
@@ -846,6 +847,7 @@ Notes:
 - The statement-footer credit and debit totals are **not persisted**. Footer totals include commission amounts (ADR-019), so they are compared against the parsed rows in memory and discarded; only `totals_status` is persisted.
 - `ignored_summary` may include TRANSFER/CHARGE/VAT counts and totals.
 - `ignored_summary` must never include commission data.
+- `unrecognized_rows` is shown to the admin only on request; counts live in `unrecognized_row_count`. It must never contain commission data (commission maps to `excluded` and never reaches this list). Amounts in it are in the batch `currency`.
 - `source_file_sha256` is a hash of the presented file, so the admin can tell that a re-presented file is the same one imported. It is separate from the content-based `statement_fingerprint`, which stays.
 - The PDF is not retained (ADR-012, ADR-019); `source_filename` and `source_page_count` are display metadata only.
 - Any monetary amounts inside `ignored_summary` and the `*_total_minor` staged-row totals are expressed in the batch `currency`.
@@ -870,7 +872,7 @@ Notes:
 | counterparty_reference | TEXT | | |
 | amount_minor | BIGINT | NOT NULL CHECK (> 0) | |
 | duplicate_key | TEXT | NOT NULL | |
-| parse_status | TEXT | NOT NULL | valid / duplicate / invalid / unrecognized |
+| parse_status | TEXT | NOT NULL | valid / duplicate / invalid |
 | parse_error | TEXT | | Reason if not valid |
 | committed_transaction_id | UUID | FK → transaction | Set after commit |
 | created_at | timestamptz | NOT NULL | |
@@ -879,11 +881,12 @@ Constraints:
 
 ```text
 CHECK (row_category IN ('tenant_payment','utility_bill_payment'))
-CHECK (parse_status IN ('valid','duplicate','invalid','unrecognized'))
+CHECK (parse_status IN ('valid','duplicate','invalid'))
 ```
 
 Notes:
 - Only persistable categories are staged. Ignored rows are summarized on the batch; commission rows are never staged.
+- Unrecognized rows are not staged; their details are kept in `import_batch.unrecognized_rows`.
 - Survives cold starts/restarts between parse and confirm.
 - After commit, rows may be pruned per retention policy (Section 11).
 
@@ -1190,7 +1193,7 @@ This list equals exactly the tables carrying `updated_at`. Five write-once opera
 
 ### 11.3 Staged row retention
 
-After an import batch is committed, `staged_import_row` entries may be pruned after a retention window, because the committed `transaction` rows are the source of truth. Pruning policy is an open question. `staged_import_row` is staging-only operational data and is not part of immutable financial history.
+After an import batch is committed, `staged_import_row` entries may be pruned after a retention window, because the committed `transaction` rows are the source of truth. Pruning policy is an open question. `staged_import_row` is staging-only operational data and is not part of immutable financial history. If staged rows are pruned, `import_batch.unrecognized_rows` is cleared on the same schedule.
 
 ### 11.4 Session retention
 
