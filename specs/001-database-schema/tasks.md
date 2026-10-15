@@ -242,7 +242,7 @@ description: "Task list for the Full MVP Database Schema feature"
 
 ### Implementation for User Story 8
 
-- [ ] T035 [US8] Create `backend/src/migrations/versions/0001_initial_schema.py` — a single reversible baseline creating all 29 tables in FK creation order, all §6 constraints and §9 indexes, the three §13-item-4 partial unique indexes and the `transaction_match (reverses_match_id)` partial unique index, each declared with both `sqlite_where` and `postgresql_where` (R-4), and the 8 §11.1 immutable triggers by calling the same per-engine trigger-SQL function `create_all` uses, explicitly with `op.execute`, with `downgrade` dropping the triggers (D-8; R-5); plus a clean `downgrade`. Proved by: `tests/test_migration.py::test_baseline_upgrade_then_downgrade_then_reapply`, `tests/test_migration.py::test_schema_has_exactly_29_tables`, `tests/test_migration.py::test_engine_equivalence_partial_indexes_and_triggers`, `tests/test_migration.py::test_all_recommended_indexes_created`, `tests/test_migration.py::test_all_tables_have_uuid_pk_and_created_at`.
+- [x] T035 [US8] Create `backend/src/migrations/versions/0001_initial_schema.py` — a single reversible baseline creating all 29 tables in FK creation order, all §6 constraints and §9 indexes, the three §13-item-4 partial unique indexes and the `transaction_match (reverses_match_id)` partial unique index, each declared with both `sqlite_where` and `postgresql_where` (R-4), and the 8 §11.1 immutable triggers by calling the same per-engine trigger-SQL function `create_all` uses, explicitly with `op.execute`, with `downgrade` dropping the triggers (D-8; R-5); plus a clean `downgrade`. Proved by: `tests/test_migration.py::test_baseline_upgrade_then_downgrade_then_reapply`, `tests/test_migration.py::test_schema_has_exactly_29_tables`, `tests/test_migration.py::test_engine_equivalence_partial_indexes_and_triggers`, `tests/test_migration.py::test_all_recommended_indexes_created`, `tests/test_migration.py::test_all_tables_have_uuid_pk_and_created_at`.
 
 **Checkpoint**: Full schema deliverable complete; all user stories independently functional
 
@@ -253,7 +253,7 @@ description: "Task list for the Full MVP Database Schema feature"
 **Purpose**: Full-suite verification across the 8 story files and both engines
 
 - [x] T036 Run the full suite on in-memory SQLite from the repository root: `.venv/bin/python -m pytest tests -q` (AGENTS.md). Must be green across all 8 story files before the feature is considered done. Proved by: the full-suite run itself.
-- [ ] T037 [P] Run the same full suite against PostgreSQL when a PG URL is configured (CI/deploy): `TEST_DATABASE_URL=postgresql+psycopg://... .venv/bin/python -m pytest tests -q` (quickstart.md; SC-010). Locally, with no PG URL, the PostgreSQL variants skip (they do not fail). Proved by: the full-suite run against `db_engine`'s PostgreSQL parameter.
+- [x] T037 [P] Run the same full suite against PostgreSQL when a PG URL is configured (CI/deploy): `TEST_DATABASE_URL=postgresql+psycopg://... .venv/bin/python -m pytest tests -q` (quickstart.md; SC-010). Locally, with no PG URL, the PostgreSQL variants skip (they do not fail). Proved by: the full-suite run against `db_engine`'s PostgreSQL parameter.
 
 ---
 
