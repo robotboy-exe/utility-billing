@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.4`
+Version: `0.10.5`
 Status: Consolidated source of truth
-Last Updated: 2026-10-10
+Last Updated: 2026-10-15
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, `changelog-03.md`
 
 ---
@@ -663,6 +663,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 | Tenant | Individual occupant. Multiple tenants per tenancy. No individual logins in MVP. |
 | Sender Alias | Accepted bank sender name for a tenancy. Primary matching key for `FUNDING` rows. |
 | Transaction | Normalized source transaction. Categorized as `tenant_payment` or `utility_bill_payment`. |
+| Transaction Match | Append-only record that a tenant payment belongs to a tenancy (automatic, manual or reversal). The current match is the latest unreversed row. |
 | Monthly Bill | Billing state for a tenancy/month. One per tenancy/month. |
 | Payment Allocation | Links a tenant payment to a monthly bill. |
 | Advance Movement | Append-only advance-credit event (created/applied/reversed) linked to its originating payment and reconciled against the derived advance balance. |
@@ -741,6 +742,7 @@ Two-ledger rules: §3 (ADR-017).
 **10.2 Matching**
 - Only `tenant_payment` rows enter matching (primarily via normalized sender aliases).
 - `utility_bill_payment` rows bypass matching and go to the utility spend report.
+- Each match, automatic or manual, is recorded as an append-only match record; a wrong match is corrected by reversal, never edited (`04-database.md`, `05-billing-engine.md` §13).
 
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Lazy and rolling through `ensure_bills_through` (§5.2.1, ADR-022).

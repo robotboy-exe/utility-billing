@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.4.1`
+Version: `0.5.0`
 Status: Draft — design phase
-Last Updated: 2026-10-09  
+Last Updated: 2026-10-15  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Locked rule 10 clarified: payments and allocations stay immutable and a bill changes only through audited `bill_adjustment` rows (matching 04 §11.2); Status aligned to the document-convention vocabulary (`Draft — design phase`, 13 §7); trailing newline added at EOF.
+Changes in this version: Matches recorded as append-only match rows (04 transaction_match); wrong-match correction defined as reverse allocations, reverse advance, reverse match, re-match.
 
 ---
 
@@ -679,6 +679,7 @@ Correction principles:
 - Recalculate derived balances.
 - Record the correction in the audit log.
 - Record advance reversals in the advance movement ledger: use type `reversed` only to undo a `created` movement, and record the restoration of an applied allocation as a new `created` movement (never as `reversed`).
+- Record match corrections by appending a reversal match row and then a new match row; never edit a match. A match is reversed only after the wrong tenancy holds no allocations from the payment; the reversal also clears the payment's advance in the same database transaction (04 §8, item 12).
 
 Detailed correction workflow belongs in the database and billing implementation documents.
 
@@ -694,7 +695,7 @@ Unmatched payments:
 - Remain in the unmatched queue.
 - Can be manually matched by admin.
 
-After manual matching:
+Matching, automatic or manual, appends a `transaction_match` row (04); a payment is matched once. A wrong match is corrected by reversing its allocations and advance, appending a reversal match row, then appending a new match; a match is never re-pointed. After a match:
 
 - The billing engine processes the payment according to the normal chronological allocation rules.
 - The action is audited.

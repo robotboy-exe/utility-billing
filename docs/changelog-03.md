@@ -50,3 +50,5 @@ Version 0.10.2 adds admin_session and admin_login_attempt to the table lists and
 Version 0.10.3 reconciles §6.4, §8.2, §5.3 and wording with 09, 10 and the owning documents; no decisions change.
 
 Version 0.10.4 aligns the timezone and spend-report terms with 04, 05, 06 and ADR-028; no decisions change.
+
+Version 0.10.5 Transaction Match entity and match-record wording added to align with 04 0.9.0.

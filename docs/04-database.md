@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.8.0`
+Version: `0.9.0`
 Status: Draft — design phase
-Last Updated: 2026-10-10
+Last Updated: 2026-10-15
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: billing_config: one org-wide row enforced by a partial unique index.
+Changes in this version: Matching recorded as append-only transaction_match rows; transaction no longer carries tenancy_id or matching_status; matching status derived; advance reconciliation scoped to actively matched payments.
 
 ---
 
@@ -109,13 +109,19 @@ ignored | excluded | unrecognized
 credit | debit
 ```
 
-### matching_status
+### match_type
+
+```text
+automatic | manual | reversal
+```
+
+### matching status (derived, not stored)
 
 ```text
 unmatched | ambiguous | matched | manually_matched | not_applicable
 ```
 
-`not_applicable` is used for utility bill payments, which never enter tenancy matching.
+Computed from transaction_match rows (see Section 7.9); utility bill payments are always not_applicable.
 
 ### allocation_type
 
@@ -169,11 +175,11 @@ AdminUser ─── Organization
                   │                    ├──< TenantAccessCredential ──< TenantSession
                   │                    ├──< TenantLoginAttempt
                   │                    ├──< AdvanceMovement
-                  │                    └──< Transaction (tenant_payment, matched)
-                  │                              ├──< PaymentAllocation >── MonthlyBill
-                  │                              └──< AdvanceMovement
+                  │                    └──< TransactionMatch >── Transaction (tenant_payment)
                   │
                   ├──< Transaction (all persisted)
+                  │         ├──< PaymentAllocation >── MonthlyBill
+                  │         └──< AdvanceMovement
                   │
                   ├── UtilityProvider (global) ──< UtilityBillPayment ── Transaction (utility_bill_payment)
                   │
@@ -535,8 +541,6 @@ Notes: append-only. One row per rate change. Drives the rate-change bill adjustm
 | counterparty_reference | TEXT | | Account/meter number in parentheses |
 | amount_minor | BIGINT | NOT NULL CHECK (> 0) | Positive magnitude |
 | currency | CHAR(3) | NOT NULL | |
-| tenancy_id | UUID | FK → tenancy | Set when matched (tenant_payment) |
-| matching_status | matching_status | NOT NULL DEFAULT unmatched | |
 | duplicate_key | TEXT | NOT NULL, UNIQUE | Deterministic hash |
 | created_at | timestamptz | NOT NULL | |
 
@@ -550,9 +554,38 @@ This CHECK guarantees commissions and ignored rows are never stored here.
 
 Notes:
 - Immutable after commit. Corrections use reversals, not edits.
-- `tenant_payment` rows get `tenancy_id` after matching.
-- `utility_bill_payment` rows use `matching_status = not_applicable` and spawn a `utility_bill_payment` record.
+- Matching is recorded in `transaction_match`; this table carries no tenancy.
+- `utility_bill_payment` rows never get match rows (derived status `not_applicable`) and spawn a `utility_bill_payment` record.
 - `duplicate_key` definition is in Section 10.
+
+---
+
+#### transaction_match
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
+| transaction_id | UUID | FK → transaction, NOT NULL | tenant_payment only (service layer) |
+| tenancy_id | UUID | FK → tenancy, NOT NULL | Same as the reversed row for a reversal |
+| match_type | match_type | NOT NULL | automatic / manual / reversal |
+| reverses_match_id | UUID | FK → transaction_match | Set for reversals only |
+| note | TEXT | | Optional |
+| created_at | timestamptz | NOT NULL | |
+
+Constraints:
+
+```text
+CHECK (match_type IN ('automatic','manual','reversal'))
+CHECK ((match_type = 'reversal' AND reverses_match_id IS NOT NULL)
+    OR (match_type <> 'reversal' AND reverses_match_id IS NULL))
+UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL
+```
+
+Notes:
+- Append-only. No `updated_at`. No deletion in normal operation.
+- Written in the same database transaction as its `audit_log` row (action e.g. `transaction.match`); the audit row carries the actor.
+- A match can be reversed at most once.
 
 ---
 
@@ -965,7 +998,7 @@ Applying advance to a newly generated bill creates a `payment_allocation` from t
 
 ### 7.5 Advance reconciliation invariant (fraud detection)
 
-For every `tenant_payment` transaction, two independent values must agree:
+For every `tenant_payment` transaction that has an active match (Section 7.9), two independent values must agree:
 
 ```text
 derived_unallocated =
@@ -982,6 +1015,8 @@ logged_advance =
 
 REQUIRED: derived_unallocated == logged_advance
 ```
+
+An unmatched payment has no net advance (a never-matched payment has no movements; one unmatched by correction has movements that net to zero) and is outside this identity.
 
 If these disagree, the system flags a reconciliation error. Because the movement log is append-only and independent of the derived computation, tampering with allocations (or with the log) breaks the equality and is detected. This is the mechanism that makes advance credit auditable and fraud-resistant.
 
@@ -1015,6 +1050,19 @@ For reporting performance, a database view or read model may later expose:
 
 For MVP, these can be plain queries. A materialized read model is a future optimization, not a requirement.
 
+### 7.9 Current match and matching status (derived)
+
+```text
+active_match(t) = the transaction_match row for t with match_type IN ('automatic','manual')
+                  and no row whose reverses_match_id = that row's id
+matched           -> active_match exists with match_type = 'automatic'
+manually_matched  -> active_match exists with match_type = 'manual'
+unmatched         -> category tenant_payment, no active_match
+ambiguous         -> unmatched, and the sender's normalized name maps to more than one tenancy
+                     (computed at read time from sender_alias; not stored)
+not_applicable    -> record_category = utility_bill_payment
+```
+
 ---
 
 ## 8. Cross-Table Constraints and Invariants
@@ -1031,6 +1079,8 @@ Some invariants span rows and are enforced in the service layer inside database 
 8. **Advance movements are atomic with allocations.** An `applied` advance movement and its allocation are written in the same transaction.
 9. **Organization scoping.** All scoped queries must filter by `organization_id`.
 10. **One org-wide billing_config per organization.** At most one `billing_config` row with `property_id` null per organization, enforced by a partial unique index.
+11. **One active match per transaction.** At most one unreversed non-reversal match row per transaction; a reversal row targets an unreversed match of the same transaction and tenancy; `utility_bill_payment` transactions never get match rows.
+12. **Allocations follow the match; the wrong tenant is left holding nothing.** A payment allocation's bill must belong to the transaction's active-match tenancy; a transaction without an active match has no net allocations and no net advance. A match may be reversed only when the transaction's net allocations (signed sum, Section 7.1) = 0. The reversal is one database transaction that writes `reversed` advance movements for the transaction's whole remaining logged advance and then the reversal match row, so the transaction ends with no active match and logged advance = 0. Correction order: reverse allocations (restoring advance per Section 7.5), then unmatch (clears the advance and appends the reversal match), then append the new match.
 
 ---
 
@@ -1041,9 +1091,10 @@ Recommended indexes beyond primary keys and unique constraints.
 | Table | Index | Purpose |
 |---|---|---|
 | transaction | (organization_id, transaction_date) | Date-scoped ledger queries |
-| transaction | (tenancy_id) | Tenant payment lookups |
 | transaction | (import_batch_id) | Batch tracing |
 | transaction | (record_category) | Ledger filtering |
+| transaction_match | (transaction_id, created_at) | Current-match lookup |
+| transaction_match | (tenancy_id) | Tenancy payment lookups |
 | monthly_bill | (billing_month) | Month reports |
 | monthly_bill | (organization_id, billing_month) | Scoped month reports |
 | payment_allocation | (transaction_id) | Allocation lookups |
@@ -1112,6 +1163,7 @@ Used to detect re-importing the same statement.
 These are append-oriented and must not be silently edited or deleted:
 
 - transaction
+- transaction_match
 - payment_allocation
 - advance_movement
 - bill_adjustment
