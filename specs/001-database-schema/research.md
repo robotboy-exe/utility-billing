@@ -56,8 +56,8 @@ Each item below was called out in the plan input and records a one-line rational
 
 ### R-7 — JSON columns
 
-- **Decision**: `sqlalchemy.JSON` for the JSONB columns (`import_profile.detection_config|parse_config|file_limits`, `import_batch.ignored_summary`, `audit_log.metadata`).
-- **Rationale**: renders as `JSONB` on PostgreSQL and `JSON` text on SQLite with no custom DDL (`docs/04` §6.7, §6.9).
+- **Decision**: `sa.JSON().with_variant(postgresql.JSONB(), "postgresql")` (the `jsonb()` helper in `backend/src/models/base.py`) for the JSONB columns (`import_profile.detection_config|parse_config|file_limits`, `import_batch.ignored_summary`, `audit_log.metadata`).
+- **Rationale**: the variant renders `JSONB` on PostgreSQL and `JSON` text on SQLite with no custom DDL (plain `sa.JSON` would render `JSON` on PostgreSQL) (`docs/04` §6.7, §6.9).
 - **Alternatives considered**: hand-rolled per-engine DDL (unnecessary).
 
 ### R-8 — Shared foundation and organization scoping

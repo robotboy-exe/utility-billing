@@ -22,7 +22,7 @@ Types of contract captured here:
 | Currency | `Char(3)` via `currency()` helper, default `"NGN"` | CHAR(3) | TEXT |
 | Timestamp | shared UTC-aware type over `DateTime(timezone=True)` (R-2) | TIMESTAMPTZ | TEXT (ISO), returned tz-aware UTC |
 | Date | `Date` | DATE | TEXT (ISO) |
-| JSON | `sa.JSON` | JSONB | TEXT (JSON) |
+| JSON | `sa.JSON().with_variant(postgresql.JSONB(), "postgresql")` | JSONB | TEXT (JSON) |
 | Enum | `TEXT` + `CHECK` (R-1) | VARCHAR + CHECK | TEXT + CHECK |
 | Boolean | `Boolean` | BOOLEAN | INTEGER (0/1) |
 
