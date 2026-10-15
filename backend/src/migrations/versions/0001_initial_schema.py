@@ -272,6 +272,11 @@ def upgrade() -> None:
         sa.Column("duplicate_row_count", sa.Integer(), nullable=True),
         sa.Column("invalid_row_count", sa.Integer(), nullable=True),
         sa.Column("unrecognized_row_count", sa.Integer(), nullable=True),
+        sa.Column(
+            "unrecognized_rows",
+            sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
+            nullable=True,
+        ),
         sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -545,7 +550,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint("direction IN ('credit', 'debit')", name="ck_direction_values"),
         sa.CheckConstraint(
-            "parse_status IN ('valid', 'duplicate', 'invalid', 'unrecognized')",
+            "parse_status IN ('valid', 'duplicate', 'invalid')",
             name="ck_parse_status_values",
         ),
         sa.CheckConstraint(

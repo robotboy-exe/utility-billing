@@ -119,6 +119,7 @@ class ImportBatch(IdCreatedAt, UpdatedAt, Base):
     duplicate_row_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     invalid_row_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     unrecognized_row_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    unrecognized_rows: Mapped[list | None] = mapped_column(jsonb(), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
@@ -134,7 +135,7 @@ class StagedImportRow(IdCreatedAt, Base):
             name="ck_row_category_values",
         ),
         sa.CheckConstraint(
-            "parse_status IN ('valid', 'duplicate', 'invalid', 'unrecognized')",
+            "parse_status IN ('valid', 'duplicate', 'invalid')",
             name="ck_parse_status_values",
         ),
         sa.Index("ix_staged_import_row_batch", "import_batch_id"),

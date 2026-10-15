@@ -269,6 +269,70 @@ def test_staged_row_parse_status_check(db_engine):
         session.rollback()
 
 
+def test_staged_row_rejects_unrecognized_parse_status(db_engine):
+    """Unrecognized rows are not staged (docs/04 §6.7, 0.9.1)."""
+    with Session(db_engine) as session:
+        organization = _make_organization(session)
+        batch = _make_batch(session, organization, _make_profile(session))
+        session.add(
+            StagedImportRow(
+                import_batch_id=batch.id,
+                row_category="tenant_payment",
+                transaction_date=datetime(2026, 1, 5).date(),
+                channel="MYSTERY",
+                direction="credit",
+                description_raw="UNKNOWN CHANNEL",
+                amount_minor=100000,
+                duplicate_key="dup-unrec-1",
+                parse_status="unrecognized",
+            )
+        )
+        with pytest.raises(sa.exc.IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_import_batch_unrecognized_rows_round_trip(db_engine):
+    """unrecognized_rows stores a list of dicts; the count is independent."""
+    details = [
+        {
+            "row_number": 4,
+            "transaction_date": "2026-01-05",
+            "channel": "MYSTERY",
+            "direction": "credit",
+            "amount_minor": 150000,
+            "description_raw": "UNKNOWN CHANNEL A",
+        },
+        {
+            "row_number": 9,
+            "transaction_date": "2026-01-07",
+            "channel": "OTHER",
+            "direction": "debit",
+            "amount_minor": 25000,
+            "description_raw": "UNKNOWN CHANNEL B",
+        },
+    ]
+    with Session(db_engine) as session:
+        organization = _make_organization(session)
+        batch = _make_batch(session, organization, _make_profile(session))
+        batch_id = batch.id
+        batch.unrecognized_rows = details
+        batch.unrecognized_row_count = 5
+        session.commit()
+    with Session(db_engine) as session:
+        stored = session.get(ImportBatch, batch_id)
+        assert stored.unrecognized_rows == details
+        assert len(stored.unrecognized_rows) == 2
+        assert stored.unrecognized_row_count == 5
+
+
+def test_import_batch_unrecognized_rows_nullable(db_engine):
+    with Session(db_engine) as session:
+        organization = _make_organization(session)
+        batch = _make_batch(session, organization, _make_profile(session))
+        assert batch.unrecognized_rows is None
+
+
 def test_staged_row_duplicate_key_not_unique(db_engine):
     with Session(db_engine) as session:
         organization = _make_organization(session)
@@ -422,3 +486,18 @@ def test_import_profile_code_unique(db_engine):
         with pytest.raises(sa.exc.IntegrityError):
             session.commit()
         session.rollback()
+
+
+def test_import_batch_unrecognized_rows_is_jsonb_on_postgresql(db_engine):
+    if db_engine.dialect.name != "postgresql":
+        pytest.skip("JSONB rendering is PostgreSQL-only")
+    with db_engine.connect() as connection:
+        data_type = connection.execute(
+            sa.text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'import_batch' "
+                "AND column_name = 'unrecognized_rows'"
+            )
+        ).scalar_one()
+    assert data_type == "jsonb"
