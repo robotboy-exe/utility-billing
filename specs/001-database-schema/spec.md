@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "Feature: database schema foundation for the Utility Billing MVP. Source of truth: docs/04-database.md (all 28 tables; every table, column, constraint and index is defined there), plus docs/03-mvp-architecture.md, docs/09-security.md and .specify/memory/constitution.md. Do not invent, rename or drop tables or columns. If something is missing or contradictory, list it as an open question instead of deciding."
+**Input**: User description: "Feature: database schema foundation for the Utility Billing MVP. Source of truth: docs/04-database.md (all 29 tables; every table, column, constraint and index is defined there), plus docs/03-mvp-architecture.md, docs/09-security.md and .specify/memory/constitution.md. Do not invent, rename or drop tables or columns. If something is missing or contradictory, list it as an open question instead of deciding."
 
 ## Overview
 
@@ -80,7 +80,7 @@ The configuration-driven, staged intake structures are established: `import_prof
 
 ### User Story 4 - Ledgers and Billing Tables (Priority: P4)
 
-The financial core is established: billing configuration (`billing_config`, `billing_override`, `standard_amount_change`), the tenant payment ledger (`transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`), and the strictly separate utility bill payment ledger (`utility_provider`, `utility_bill_payment`). Money is stored as integer minor units with explicit currency; financial history tables are append-only; commission rows cannot be persisted; and the two ledgers cannot cross-settle.
+The financial core is established: billing configuration (`billing_config`, `billing_override`, `standard_amount_change`), the tenant payment ledger (`transaction`, `transaction_match`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`), and the strictly separate utility bill payment ledger (`utility_provider`, `utility_bill_payment`). Money is stored as integer minor units with explicit currency; financial history tables are append-only; commission rows cannot be persisted; and the two ledgers cannot cross-settle.
 
 **Why this priority**: This is the highest-risk domain (constitution Principle I). It depends on User Stories 1–3 (organization, tenancy, import batch references) and is the reason the schema exists.
 
@@ -98,6 +98,10 @@ The financial core is established: billing configuration (`billing_config`, `bil
 8. **Given** a change to `monthly_bill.final_amount_minor`, **When** the change is applied, **Then** a corresponding `bill_adjustment` row is required to exist (`docs/04` §6.5, §8.7; constitution Database & Schema).
 9. **Given** the two ledgers, **When** any attempt is made to record tenancy matching state on a `utility_bill_payment` or to create a `payment_allocation` for a `utility_bill_payment` transaction, **Then** the schema provides no such columns/paths, enforcing ledger separation (`docs/04` §6.5, §6.6, §8.3; ADR-017).
 10. **Given** an org-wide `billing_config` (`property_id` null) for an organization, **When** a second org-wide `billing_config` for the same organization is inserted, **Then** it is rejected by the partial unique index `UNIQUE (organization_id) WHERE property_id IS NULL` (`docs/04` §6.4, §8 item 10, §13 item 4).
+11. **Given** a `transaction_match` row of type `reversal`, **When** it is inserted without `reverses_match_id`, **Then** it is rejected by the CHECK constraint (`docs/04` §6.5).
+12. **Given** a non-reversal `transaction_match` row, **When** it is inserted with `reverses_match_id`, **Then** it is rejected by the CHECK constraint (`docs/04` §6.5).
+13. **Given** a match already reversed once, **When** a second reversal row targets it, **Then** it is rejected by the partial unique index `UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL` (`docs/04` §6.5, §8.11).
+14. **Given** a written `transaction_match` row, **When** an UPDATE or DELETE is attempted, **Then** it is rejected by the append-only trigger (`docs/04` §11.1).
 
 ---
 
@@ -152,15 +156,15 @@ Idempotent seed data provisions the system's reference and configuration rows pe
 
 ### User Story 8 - Baseline Migration (Priority: P8)
 
-The whole schema is delivered as a single reversible baseline Alembic migration so the full 28-table structure, its constraints, and its indexes can be applied to a fresh database and rolled back cleanly, with structurally equivalent results on the production database engine and the local-development engine.
+The whole schema is delivered as a single reversible baseline Alembic migration so the full 29-table structure, its constraints, and its indexes can be applied to a fresh database and rolled back cleanly, with structurally equivalent results on the production database engine and the local-development engine.
 
 **Why this priority**: Last by dependency — it packages everything above. It has value only once the schema slices exist.
 
-**Independent Test**: Apply the migration to a fresh database, verify all 28 tables, constraints, and indexes exist, roll it back completely, then re-apply, with no errors and no residue on either supported engine.
+**Independent Test**: Apply the migration to a fresh database, verify all 29 tables, constraints, and indexes exist, roll it back completely, then re-apply, with no errors and no residue on either supported engine.
 
 **Acceptance Scenarios**:
 
-1. **Given** a fresh database, **When** the baseline migration is applied, **Then** it completes with no errors and creates exactly the 28 tables in `docs/04` §6 with their constraints and indexes (`docs/04` §9, §12).
+1. **Given** a fresh database, **When** the baseline migration is applied, **Then** it completes with no errors and creates exactly the 29 tables in `docs/04` §6 with their constraints and indexes (`docs/04` §9, §12).
 2. **Given** an applied migration, **When** it is downgraded and re-applied, **Then** the cycle completes cleanly with no errors or leftover objects (`docs/04` §12; constitution Database & Schema).
 3. **Given** the migration applied on the production engine and on the local-development engine, **When** the resulting structures are compared, **Then** they are functionally equivalent (same tables, columns, constraints, and index behavior), including the partial unique indexes required by `docs/04` §13 item 4.
 
@@ -172,7 +176,7 @@ The whole schema is delivered as a single reversible baseline Alembic migration 
 - A `reversed` advance movement offsets only a `created` movement; restoring advance after an allocation is reversed is recorded as a new `created` movement, so the reconciliation identity in `docs/04` §7.5 stays sound (schema provides the columns/types; logic is out of scope).
 - Money is always a non-negative magnitude with direction stored separately; a negative monetary value must not be stored (`docs/04` §3.4, §6.5).
 - `tenant_session`/`admin_session` and login-attempt rows are prunable operational data and must not be treated as immutable financial history (`docs/04` §11.2, §11.4, §11.6).
-- A `utility_bill_payment` must never enter tenancy matching (`matching_status = not_applicable`) or reduce a tenant balance (`docs/04` §6.5, §6.6, §8.3).
+- A `utility_bill_payment` never gets match rows and its matching status is derived as `not_applicable`; it must never reduce a tenant balance (`docs/04` §6.5, §7.9, §8.11).
 
 ## Requirements *(mandatory)*
 
@@ -186,7 +190,7 @@ Schema coverage. Each requirement below MUST reproduce the columns, types, nulla
 - **FR-004**: System MUST persist `billing_config`, `billing_override`, and `standard_amount_change` exactly per `docs/04` §6.4 (including the partial unique index `UNIQUE (organization_id) WHERE property_id IS NULL` that allows one org-wide default row per organization); `transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, and `bill_adjustment` exactly per `docs/04` §6.5; and `utility_provider` and `utility_bill_payment` exactly per `docs/04` §6.6 (User Story 4).
 - **FR-005**: System MUST persist `portal_setting` exactly per `docs/04` §6.8 (User Story 5).
 - **FR-006**: System MUST persist `audit_log` exactly per `docs/04` §6.9, and `admin_session`, `admin_login_attempt`, and `tenant_login_attempt` exactly per `docs/04` §6.1 (User Story 6).
-- **FR-007**: The complete schema MUST consist of exactly the 28 tables enumerated in `docs/04` §6 — no more, no fewer — with the exact table and column names given there.
+- **FR-007**: The complete schema MUST consist of exactly the 29 tables enumerated in `docs/04` §6 — no more, no fewer — with the exact table and column names given there.
 
 Cross-cutting conventions.
 
@@ -194,18 +198,18 @@ Cross-cutting conventions.
 - **FR-009**: Every monetary amount MUST be stored as an integer minor-unit `BIGINT` value with no floating-point storage, per `docs/04` §3.4 and the constitution Principle I.
 - **FR-010**: Every persisted table that stores a monetary amount MUST carry an explicit `currency CHAR(3) NOT NULL` column defaulting to the MVP currency; transient staging structures do not carry currency (`docs/04` §3.5, §6).
 - **FR-011**: Every table MUST carry `created_at`; `updated_at` MUST be present only on the mutable tables listed in `docs/04` §11.2. Instants MUST be stored in UTC (`docs/04` §3.2; ADR-028).
-- **FR-012**: System MUST enforce the persisted value domains in `docs/04` §4 for `tenancy_status`, `record_category`, `direction`, `matching_status`, `allocation_type`, `advance_movement_type`, `import_batch_status`, and `totals_status`, and the inline value sets and CHECK constraints defined in `docs/04` §6 for columns whose allowed values are listed there (e.g. `staged_import_row.row_category`, `import_channel_category_mapping.category`, `portal_setting.scope_type`). `record_category` is a `docs/04` §4 enumeration, not a §6 inline set.
+- **FR-012**: System MUST enforce the persisted value domains in `docs/04` §4 for `tenancy_status`, `record_category`, `direction`, `match_type`, `allocation_type`, `advance_movement_type`, `import_batch_status`, and `totals_status`, and the inline value sets and CHECK constraints defined in `docs/04` §6 for columns whose allowed values are listed there (e.g. `staged_import_row.row_category`, `import_channel_category_mapping.category`, `portal_setting.scope_type`). `record_category` is a `docs/04` §4 enumeration, not a §6 inline set.
 - **FR-013**: Key financial and structural tables MUST carry `organization_id`, and the schema MUST support org-scoped queries as required by `docs/04` §2.5 and §8.9 (constitution Database & Schema).
 
 Integrity and invariants.
 
 - **FR-014**: System MUST enforce strict two-ledger separation structurally: `utility_bill_payment` MUST have no tenancy-matching state and MUST tie one-to-one to its source transaction via a unique `transaction_id`; tenant payments and utility bill payments MUST NOT be structurally cross-settleable (`docs/04` §6.5, §6.6, §8.3; ADR-017).
 - **FR-015**: System MUST make it impossible to persist commission data: the `transaction.record_category` and `staged_import_row.row_category` CHECK constraints MUST admit only `tenant_payment`/`utility_bill_payment`, and no table, column, constraint, or index may accept a commission-mapped channel (`docs/04` §6.5, §6.7, §8.4; constitution Principle III).
-- **FR-016**: System MUST make all financial-history tables append-only — `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, and `audit_log` — rejecting in-place UPDATE and DELETE once a row is written (`docs/04` §11.1; constitution Principle I).
+- **FR-016**: System MUST make all financial-history tables append-only — `transaction`, `transaction_match`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, and `audit_log` — rejecting in-place UPDATE and DELETE once a row is written (`docs/04` §11.1; constitution Principle I).
 - **FR-017**: System MUST store derived state only by computation and MUST NOT store independently mutable copies of bill status, bill remaining, tenancy outstanding, advance balance, net position, or utility spend; the authoritative records required by the computations in `docs/04` §7 MUST exist (`docs/04` §7; constitution Database & Schema).
 - **FR-018**: System MUST provide the duplicate-detection keys defined in `docs/04` §10: a unique `duplicate_key` on `transaction` only (`docs/04` §6.5, §10.1); `staged_import_row.duplicate_key` MUST NOT be unique (`docs/04` §6.7) so rows with `parse_status = 'duplicate'` remain stageable; and a `statement_fingerprint` on `import_batch` with a partial unique index restricted to `confirmed`/`completed` status (`docs/04` §6.7, §10.2).
-- **FR-019**: System MUST enforce the single-column and composite unique/foreign-key constraints defined across `docs/04` §6, including `admin_user.email`, `tenant_access_credential.tenancy_id`, `UNIQUE (tenancy_id, normalized_name)` on `sender_alias`, `UNIQUE (tenancy_id, billing_month)` on `billing_override`, `UNIQUE (tenancy_id, billing_month)` on `monthly_bill`, `utility_bill_payment.transaction_id`, `utility_provider.code`, `import_profile.code`, `UNIQUE (import_profile_id, channel, COALESCE(direction,'ANY'))`, `UNIQUE (scope_type, scope_id, setting_key)` on `portal_setting`, and all declared foreign keys.
-- **FR-020**: System MUST enforce the partial unique indexes required by `docs/04` §13 item 4 — `UNIQUE (room_id) WHERE status = 'active'` on `tenancy`, `UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')` on `import_batch`, and `UNIQUE (organization_id) WHERE property_id IS NULL` on `billing_config` — on both the production database engine (PostgreSQL, `postgresql_where`) and the local-development engine (SQLite, `sqlite_where`).
+- **FR-019**: System MUST enforce the single-column and composite unique/foreign-key constraints defined across `docs/04` §6, including `admin_user.email`, `tenant_access_credential.tenancy_id`, `UNIQUE (tenancy_id, normalized_name)` on `sender_alias`, `UNIQUE (tenancy_id, billing_month)` on `billing_override`, `UNIQUE (tenancy_id, billing_month)` on `monthly_bill`, `utility_bill_payment.transaction_id`, `utility_provider.code`, `import_profile.code`, `UNIQUE (import_profile_id, channel, COALESCE(direction,'ANY'))`, `UNIQUE (scope_type, scope_id, setting_key)` on `portal_setting`, `UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL` on `transaction_match`, and all declared foreign keys.
+- **FR-020**: System MUST enforce the partial unique indexes required by `docs/04` §13 item 4 — `UNIQUE (room_id) WHERE status = 'active'` on `tenancy`, `UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')` on `import_batch`, , `UNIQUE (organization_id) WHERE property_id IS NULL` on `billing_config`, and `UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL` on `transaction_match` (`docs/04` §6.5) — on both the production database engine (PostgreSQL, `postgresql_where`) and the local-development engine (SQLite, `sqlite_where`).
 - **FR-021**: System MUST create the recommended indexes in `docs/04` §9 (beyond primary keys and unique constraints).
 - **FR-022**: System MUST enforce that a change to `monthly_bill.final_amount_minor` has a corresponding `bill_adjustment` row; the schema MUST provide the columns, foreign keys, and tests that make this checkable, with enforcement assigned to the billing-engine feature (`docs/04` §6.5, §8.7; constitution Database & Schema). Logic-dependent invariants (allocation cap and advance reconciliation, `docs/04` §7.5, §8.1–8.2) MUST be enforceable from the schema's columns and are verified against those records.
 
@@ -215,6 +219,7 @@ Packaging and scope.
 - **FR-024**: System MUST provide idempotent seed data for exactly the MVP rows in `docs/04` §12 (one organization, one admin user, the global `PAYVICE_AVANTUS` profile and mappings, the global `BEDC` provider, one default `billing_config`, default portal settings).
 - **FR-025**: The feature scope MUST be limited to the schema and seed data. System MUST NOT deliver any API, UI, authentication logic, ingestion/parsing logic, billing allocation logic, or reporting/read-model logic (`docs/04` §1, §12).
 - **FR-026**: The `organization` model MUST validate `timezone` as a valid IANA time-zone name at the model layer and default it to `Africa/Lagos`; the database stores the given string (`docs/04` §6.2). This adds model-layer validation only — no API or authentication logic (User Story 1).
+- **FR-027**: System MUST provide `transaction_match` per `docs/04` §6.5 (append-only; `match_type` CHECK; reversal rows carry `reverses_match_id` and no other row does; a match can be reversed at most once), and `transaction` MUST carry no tenancy or matching-status columns (`docs/04` §6.5, §8.11).
 
 ### Key Entities *(include if feature involves data)*
 
@@ -223,7 +228,7 @@ Packaging and scope.
 - **tenancy / tenant / sender_alias / tenant_access_credential / tenant_session**: Occupancy, privacy boundary, match namespace, and tenancy-scoped access — `docs/04` §6.3, §6.1.
 - **import_profile / import_channel_category_mapping / import_batch / staged_import_row**: Configuration-driven staging; trust boundary for commissions — `docs/04` §6.7.
 - **billing_config / billing_override / standard_amount_change**: Standard amount, per-tenancy/month bill-or-skip, append-only rate-change history — `docs/04` §6.4.
-- **transaction / monthly_bill / payment_allocation / advance_movement / bill_adjustment**: Tenant payment ledger and billing state (append-only financial history) — `docs/04` §6.5.
+- **transaction / transaction_match / monthly_bill / payment_allocation / advance_movement / bill_adjustment**: Tenant payment ledger and billing state (append-only financial history) — `docs/04` §6.5.
 - **utility_provider / utility_bill_payment**: Global provider registry and outgoing spend records (separate ledger) — `docs/04` §6.6.
 - **portal_setting**: Scoped visibility and default-view policy — `docs/04` §6.8.
 - **audit_log / admin_session / admin_login_attempt / tenant_login_attempt**: Append-only audit and operational session/rate-limit data — `docs/04` §6.9, §6.1.
@@ -232,9 +237,9 @@ Packaging and scope.
 
 ### Measurable Outcomes
 
-- **SC-001**: A freshly migrated database contains exactly 28 tables, matching the set in `docs/04` §6 by name (0 missing, 0 extra).
+- **SC-001**: A freshly migrated database contains exactly 29 tables, matching the set in `docs/04` §6 by name (0 missing, 0 extra).
 - **SC-002**: Every constraint defined in `docs/04` §6, §8, §9, §10 is enforced: inserting or updating data that violates a unique, CHECK, foreign-key, or not-null rule is rejected. This explicitly includes the partial unique indexes in `docs/04` §13 item 4, verified on both SQLite and PostgreSQL.
-- **SC-003**: 100% of the append-only tables listed in `docs/04` §11.1 reject UPDATE and DELETE on a written row (7 of 7) via database-level rejection on both SQLite and PostgreSQL (native triggers, `docs/04` §11.1).
+- **SC-003**: 100% of the append-only tables listed in `docs/04` §11.1 reject UPDATE and DELETE on a written row (8 of 8) via database-level rejection on both SQLite and PostgreSQL (native triggers, `docs/04` §11.1).
 - **SC-004**: 100% of monetary columns are integer minor units stored with an explicit `currency`; a stored value round-trips exactly with no floating-point loss (verified across all money-bearing tables).
 - **SC-005**: 100% of timestamp columns store UTC instants; `updated_at` appears only on the mutable tables in `docs/04` §11.2 and on no append-only table.
 - **SC-006**: 0 commission rows can be persisted, staged, or logged: every commission-mapped channel is rejected by the schema's CHECK constraints.
@@ -246,8 +251,8 @@ Packaging and scope.
 ## Assumptions
 
 - `docs/04-database.md` is the source of truth; this feature implements it fully. `docs/03`, `docs/09`, and the constitution constrain how, but the table/column contract lives only in `docs/04`.
-- The table count is 28, confirmed by enumerating `docs/04` §6.1–§6.9 (6 + 3 + 3 + 3 + 5 + 2 + 4 + 1 + 1).
-- User-story grouping is a presentation choice, not a schema change: `tenant_session` is placed with the tenancy slice (User Story 2) because it is bound to `tenant_access_credential`, while `admin_session`, `admin_login_attempt`, `tenant_login_attempt`, and `audit_log` form the audit/security slice (User Story 6). Every table appears in exactly one slice, and all 28 are covered.
+- The table count is 29, confirmed by enumerating `docs/04` §6.1–§6.9 (6 + 3 + 3 + 3 + 6 + 2 + 4 + 1 + 1).
+- User-story grouping is a presentation choice, not a schema change: `tenant_session` is placed with the tenancy slice (User Story 2) because it is bound to `tenant_access_credential`, while `admin_session`, `admin_login_attempt`, `tenant_login_attempt`, and `audit_log` form the audit/security slice (User Story 6). Every table appears in exactly one slice, and all 29 are covered.
 - The MVP currency is NGN (ISO 4217); monetary examples use ₦ (`docs/04` §3.5).
 - Production is PostgreSQL and local development is SQLite; idempotent identifiers, integer money, immutability, and ledger separation follow the ratified constitution and locked ADRs (ADR-001, ADR-017, ADR-019, ADR-021, ADR-025, ADR-028).
 - Timestamps are stored in UTC. Calendar-month boundaries (`billing_month`, "current month", utility-spend grouping) are computed in application code from the organization's `timezone`, not by the database engine (`docs/04` §6.2; ADR-028).

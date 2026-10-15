@@ -1,12 +1,12 @@
 # Data Model: Full MVP Database Schema
 
-**Feature**: `001-database-schema` | **Date**: 2026-10-10 | **Authoritative source**: `docs/04-database.md` (all 28 tables, columns, constraints, indexes, enums, invariants).
+**Feature**: `001-database-schema` | **Date**: 2026-10-10 | **Authoritative source**: `docs/04-database.md` (all 29 tables, columns, constraints, indexes, enums, invariants).
 
 This document is **only** the table-to-module map plus the cross-cutting rules. It deliberately does **not** restate columns, types, or per-table constraints — those live in `docs/04` §6 and are referenced by section here. The ORM models, the baseline migration, and the seed must satisfy `docs/04` exactly; no table, column, constraint, or index may be invented, renamed, or dropped.
 
 **Engine/type decisions** (details in [research.md](research.md)): UUID PKs app-side `uuid4` (R-6); one shared UTC-aware datetime type on every `*_at` column (R-2); money via shared helpers (R-3); enums TEXT + CHECK (R-1); partial unique indexes declared for both `sqlite_where` and `postgresql_where` (R-4); immutable tables blocked by triggers on both engines from one shared DDL (R-5).
 
-## 1. Table → module map (all 28 tables)
+## 1. Table → module map (all 29 tables)
 
 Every table below appears in exactly one module and one user story; `docs/04` §6 remains the column contract.
 
@@ -29,6 +29,7 @@ Every table below appears in exactly one module and one user story; `docs/04` §
 | `billing_override` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.4 |
 | `standard_amount_change` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.4 |
 | `transaction` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.5 |
+| `transaction_match` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.5 |
 | `monthly_bill` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.5 |
 | `payment_allocation` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.5 |
 | `advance_movement` | ledgers & billing | `backend/src/models/ledgers_billing.py` | US4 | §6.5 |
@@ -41,7 +42,7 @@ Every table below appears in exactly one module and one user story; `docs/04` §
 | `admin_login_attempt` | audit | `backend/src/models/audit.py` | US6 | §6.1 |
 | `tenant_login_attempt` | audit | `backend/src/models/audit.py` | US6 | §6.1 |
 
-Count check (spec Assumptions, SC-001): `2 + 7 + 4 + 10 + 1 + 4 = 28` tables, matching `docs/04` §6.1–§6.9.
+Count check (spec Assumptions, SC-001): `2 + 7 + 4 + 11 + 1 + 4 = 29` tables, matching `docs/04` §6.1–§6.9.
 
 ## 2. Module boundaries
 
@@ -59,8 +60,8 @@ Each rule is enforced by the cited `docs/04` section; columns/constraints are de
 - **Enumerations**: `TEXT` + `CHECK`, including the inline value sets (`docs/04` §4, §6) (R-1).
 - **Organization scoping**: `organization_id` on the scoped tables and all scoped queries filter by it (`docs/04` §2.5, §8.9; R-8).
 - **Organization timezone**: stored as an IANA `TEXT` string defaulting to `Africa/Lagos`; the model validates it as a valid IANA name before persistence (`docs/04` §6.2; spec FR-026).
-- **Immutability**: the seven append-only tables (`docs/04` §11.1) reject `UPDATE`/`DELETE` via triggers on both engines, from one shared DDL (R-5). The mutable set is exactly `docs/04` §11.2; the five write-once operational tables are excluded there (`tenant_session`, `admin_session`, `staged_import_row`, `tenant_login_attempt`, `admin_login_attempt`).
-- **Partial unique indexes**: `tenancy` (`UNIQUE (room_id) WHERE status = 'active'`), `import_batch` (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`), and `billing_config` (`UNIQUE (organization_id) WHERE property_id IS NULL`, one org-wide default row per organization) are declared with both `sqlite_where` and `postgresql_where` (`docs/04` §6.3, §6.4, §6.7, §8.5, §10.2, §13 item 4; R-4).
+- **Immutability**: the eight append-only tables (`docs/04` §11.1) reject `UPDATE`/`DELETE` via triggers on both engines, from one shared DDL (R-5). The mutable set is exactly `docs/04` §11.2; the five write-once operational tables are excluded there (`tenant_session`, `admin_session`, `staged_import_row`, `tenant_login_attempt`, `admin_login_attempt`).
+- **Partial unique indexes**: `tenancy` (`UNIQUE (room_id) WHERE status = 'active'`), `import_batch` (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`), `billing_config` (`UNIQUE (organization_id) WHERE property_id IS NULL`, one org-wide default row per organization), and `transaction_match` (`UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL`) are declared with both `sqlite_where` and `postgresql_where` (`docs/04` §6.3, §6.4, §6.7, §8.5, §10.2, §13 item 4; §6.5 for `transaction_match`; R-4).
 - **Ledger separation**: the two ledgers are structurally distinct and cannot cross-settle; `utility_bill_payment` has no tenancy-matching state and ties one-to-one to its source transaction (`docs/04` §6.5–§6.6, §8.3; ADR-017).
 - **Commissions never stored**: the `transaction.record_category` and `staged_import_row.row_category` CHECK constraints admit only persistable categories, and `COMMISSION` maps to `excluded` (`docs/04` §6.5, §6.7, §8.4; constitution Principle III).
 - **Derived state not stored**: bill status, bill remaining, tenancy outstanding, advance balance, net position, and utility spend are computed from the authoritative tables (`docs/04` §7); no independently mutable copies.

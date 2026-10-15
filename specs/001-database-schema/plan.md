@@ -32,13 +32,13 @@ Deliver the complete database layer for the Utility Billing MVP as SQLAlchemy 2.
 
 **Constraints**: free hosting (no workers/schedulers); money as integer minor units + explicit currency (no floats); append-only financial tables; org-scoped queries; PostgreSQL/SQLite parity — **both engines now enforce partial unique indexes and immutable-table triggers natively** (R-4, R-5)
 
-**Scale/Scope**: single org MVP; 28 tables + seed
+**Scale/Scope**: single org MVP; 29 tables + seed
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Principle I — Financial correctness & immutable history**: Conforms. Money is `BIGINT` minor units + explicit `currency` via shared helpers (R-3); the seven financial tables are append-only and rejected at the database level on both engines by triggers from one shared DDL (R-5); corrections use reversal/correction rows; no mutable stored advance balance (`docs/04` §7.4–7.5). **PASS**
+- **Principle I — Financial correctness & immutable history**: Conforms. Money is `BIGINT` minor units + explicit `currency` via shared helpers (R-3); the eight financial tables are append-only and rejected at the database level on both engines by triggers from one shared DDL (R-5); corrections use reversal/correction rows; no mutable stored advance balance (`docs/04` §7.4–7.5). **PASS**
 - **Principle II — Billing engine independence**: Conforms. Models express only domain data; no source/billing rules are embedded (spec FR-025). **PASS**
 - **Principle III — Ingestion reliability & integrity**: Conforms. Staged/confirmed structures with duplicate keys (`docs/04` §10); commissions never stored (CHECK + category mapping); mapping is configuration data. **PASS**
 - **Principle IV — Two-ledger separation**: Conforms. Structural separation with unique `transaction_id` on `utility_bill_payment` and no tenancy-matching state there (`docs/04` §6.5–§6.6, §8.3). **PASS**
@@ -51,8 +51,8 @@ Deliver the complete database layer for the Utility Billing MVP as SQLAlchemy 2.
 
 Re-evaluated after data-model/contracts/quickstart design:
 - Money remains integer minor units + currency (R-3); no float path.
-- All seven financial tables remain append-only; now enforced by triggers on **both** engines from one DDL source (R-5), so the SQLite tests exercise the same definition the migration applies.
-- The three partial unique indexes (tenancy, import_batch, billing_config) are declared for both `sqlite_where` and `postgresql_where` (R-4), so the invariants are enforced and testable locally — the earlier PostgreSQL-only/app-layer divergence is removed.
+- All eight financial tables remain append-only; now enforced by triggers on **both** engines from one DDL source (R-5), so the SQLite tests exercise the same definition the migration applies.
+- The four partial unique indexes (tenancy, import_batch, billing_config, transaction_match (reverses_match_id)) are declared for both `sqlite_where` and `postgresql_where` (R-4), so the invariants are enforced and testable locally — the earlier PostgreSQL-only/app-layer divergence is removed.
 - Testing uses in-memory SQLite per AGENTS.md; PostgreSQL-native behavior is re-confirmed in CI. **PASS**
 
 ## Project Structure

@@ -41,6 +41,7 @@ description: "Task list for the Full MVP Database Schema feature"
 | `tests/test_tenancy.py` | US2 | P2 | FR-002, FR-008, FR-011, FR-012, FR-019, FR-020 |
 | `tests/test_ingestion.py` | US3 | P3 | FR-003, FR-010, FR-012, FR-015, FR-018, FR-019, FR-020 |
 | `tests/test_ledgers_billing.py` | US4 | P4 | FR-004, FR-009, FR-010, FR-011, FR-013, FR-014, FR-015, FR-016, FR-017, FR-019, FR-020, FR-021, FR-022 |
+| `tests/test_transaction_match.py` | US4 | P4 | FR-012, FR-016, FR-019, FR-020, FR-021, FR-027 |
 | `tests/test_settings.py` | US5 | P5 | FR-005, FR-012, FR-019 |
 | `tests/test_audit.py` | US6 | P6 | FR-006, FR-011, FR-012, FR-016 |
 | `tests/test_seed.py` | US7 | P7 | FR-024 |
@@ -142,6 +143,8 @@ description: "Task list for the Full MVP Database Schema feature"
 
 ## Phase 6: User Story 4 - Ledgers and Billing Tables (Priority: P4)
 
+> Design B (docs/04 0.9.0): T038 to T041 amend T004, T021, T023 and T025: the `transaction` columns `tenancy_id` and `matching_status` and its `(tenancy_id)` index are removed, `matching_status` becomes the derived status (not stored) with `match_type` added to the stored enums, the `transaction_match` table is added, and the immutable-trigger registration covers 8 tables.
+
 **Goal**: The financial core per `docs/04` §6.4–§6.6: billing configuration (`billing_config`, `billing_override`, `standard_amount_change`), the tenant payment ledger (`transaction`, `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`), and the strictly separate utility bill ledger (`utility_provider`, `utility_bill_payment`).
 
 **Independent Test**: billing-config uniqueness, one-bill-per-tenancy-per-month, `transaction.duplicate_key` uniqueness and `record_category` CHECK, `utility_bill_payment.transaction_id` uniqueness, money stored as integer minor units + explicit currency, every §11.1 table rejects UPDATE/DELETE, derived state never stored, and no cross-ledger settlement path.
@@ -199,7 +202,7 @@ description: "Task list for the Full MVP Database Schema feature"
 
 - [ ] T029 [US6] Create the `audit_log` model in `backend/src/models/audit.py` verbatim per `docs/04` §6.9 (UUID PK, `organization_id FK NOT NULL`, `actor_type TEXT NOT NULL`, `actor_id UUID`, `action TEXT NOT NULL`, `entity_type TEXT`, `entity_id UUID`, `metadata JSONB`, `created_at`; append-only, no `updated_at`; `CHECK (actor_type IN ('admin','system','tenant_session'))`). Proved by: `tests/test_audit.py::test_audit_log_append_only_no_updated_at` and `tests/test_audit.py::test_audit_log_actor_type_check`.
 - [ ] T030 [US6] Create `admin_session`, `admin_login_attempt`, and `tenant_login_attempt` models in `backend/src/models/audit.py` verbatim per `docs/04` §6.1: `admin_session` (UUID PK, `admin_user_id FK NOT NULL`, `token_hash NOT NULL`, `device_info`, `issued_at NOT NULL`, `expires_at NOT NULL`, `revoked_at`, `created_at`; write-once, no `updated_at`); `admin_login_attempt` (UUID PK, `organization_id FK NOT NULL`, `admin_user_id FK` nullable, `source_ip`, `attempted_at NOT NULL`, `succeeded BOOLEAN NOT NULL`, `created_at`; indexes `(admin_user_id, attempted_at)` and `(source_ip, attempted_at)`); `tenant_login_attempt` (UUID PK, `organization_id FK NOT NULL`, `tenancy_id FK` nullable, `source_ip`, `attempted_at NOT NULL`, `succeeded BOOLEAN NOT NULL`, `created_at`; indexes `(tenancy_id, attempted_at)` and `(source_ip, attempted_at)`). Proved by: `tests/test_audit.py::test_admin_session_validity_predicate_and_scoping`, `tests/test_audit.py::test_admin_login_attempt_nullable_admin_user_id`, `tests/test_audit.py::test_tenant_login_attempt_nullable_tenancy_id_and_utc`, `tests/test_audit.py::test_login_attempt_tables_are_prunable_not_append_only`.
-- [ ] T031 [US6] Register the US6 models in `backend/src/models/__init__.py` (this completes the full 28-table `Base.metadata`) and ensure `audit_log` receives the shared immutable-trigger DDL. Proved by: `tests/test_audit.py::test_audit_log_append_only_no_updated_at`.
+- [ ] T031 [US6] Register the US6 models in `backend/src/models/__init__.py` (this completes the full 29-table `Base.metadata`) and ensure `audit_log` receives the shared immutable-trigger DDL. Proved by: `tests/test_audit.py::test_audit_log_append_only_no_updated_at`.
 
 **Checkpoint**: US1–US6 independently functional
 
@@ -227,19 +230,19 @@ description: "Task list for the Full MVP Database Schema feature"
 
 ## Phase 10: User Story 8 - Baseline Migration (Priority: P8)
 
-**Goal**: Deliver the whole schema as one reversible baseline Alembic migration creating all 28 tables, constraints, indexes, both-engine partial unique indexes, and triggers, with equivalent results on PostgreSQL and SQLite.
+**Goal**: Deliver the whole schema as one reversible baseline Alembic migration creating all 29 tables, constraints, indexes, both-engine partial unique indexes, and triggers, with equivalent results on PostgreSQL and SQLite.
 
-**Independent Test**: Apply the migration to a fresh database, verify all 28 tables/constraints/indexes exist, roll it back completely, re-apply with no errors or residue, on either supported engine.
+**Independent Test**: Apply the migration to a fresh database, verify all 29 tables/constraints/indexes exist, roll it back completely, re-apply with no errors or residue, on either supported engine.
 
 **Requirements**: FR-007, FR-020, FR-023, FR-025.
 
 ### Tests for User Story 8 (write FIRST, ensure they FAIL) ⚠️
 
-- [ ] T034 [P] [US8] Write `tests/test_migration.py`: `test_baseline_upgrade_then_downgrade_then_reapply` (SC-008/FR-023), `test_schema_has_exactly_28_tables` (0 missing, 0 extra vs `docs/04` §6; FR-007/SC-001), `test_engine_equivalence_partial_indexes_and_triggers` (same tables/columns/constraints and native partial-index/trigger enforcement on SQLite always and PostgreSQL when a PG URL is configured; SC-010/FR-020), `test_all_recommended_indexes_created` (`docs/04` §9; FR-021), `test_all_tables_have_uuid_pk_and_created_at` (all 28 tables carry a UUID PK and `created_at`; FR-008/FR-011), `test_scope_guard_no_forbidden_modules` (the package exposes only the schema/seed/migration modules — no API, UI, auth, ingestion/parsing, billing/allocation, or reporting modules; FR-025). Proved by: the functions themselves.
+- [ ] T034 [P] [US8] Write `tests/test_migration.py`: `test_baseline_upgrade_then_downgrade_then_reapply` (SC-008/FR-023), `test_schema_has_exactly_29_tables` (0 missing, 0 extra vs `docs/04` §6; FR-007/SC-001), `test_engine_equivalence_partial_indexes_and_triggers` (same tables/columns/constraints and native partial-index/trigger enforcement on SQLite always and PostgreSQL when a PG URL is configured; SC-010/FR-020), `test_all_recommended_indexes_created` (`docs/04` §9; FR-021), `test_all_tables_have_uuid_pk_and_created_at` (all 29 tables carry a UUID PK and `created_at`; FR-008/FR-011), `test_scope_guard_no_forbidden_modules` (the package exposes only the schema/seed/migration modules — no API, UI, auth, ingestion/parsing, billing/allocation, or reporting modules; FR-025). Proved by: the functions themselves.
 
 ### Implementation for User Story 8
 
-- [ ] T035 [US8] Create `backend/src/migrations/versions/0001_initial_schema.py` — a single reversible baseline creating all 28 tables in FK creation order, all §6 constraints and §9 indexes, the three §13-item-4 partial unique indexes declared with both `sqlite_where` and `postgresql_where` (R-4), and the 7 §11.1 immutable triggers by calling the same per-engine trigger-SQL function `create_all` uses, explicitly with `op.execute`, with `downgrade` dropping the triggers (D-8; R-5); plus a clean `downgrade`. Proved by: `tests/test_migration.py::test_baseline_upgrade_then_downgrade_then_reapply`, `tests/test_migration.py::test_schema_has_exactly_28_tables`, `tests/test_migration.py::test_engine_equivalence_partial_indexes_and_triggers`, `tests/test_migration.py::test_all_recommended_indexes_created`, `tests/test_migration.py::test_all_tables_have_uuid_pk_and_created_at`.
+- [ ] T035 [US8] Create `backend/src/migrations/versions/0001_initial_schema.py` — a single reversible baseline creating all 29 tables in FK creation order, all §6 constraints and §9 indexes, the three §13-item-4 partial unique indexes and the `transaction_match (reverses_match_id)` partial unique index, each declared with both `sqlite_where` and `postgresql_where` (R-4), and the 8 §11.1 immutable triggers by calling the same per-engine trigger-SQL function `create_all` uses, explicitly with `op.execute`, with `downgrade` dropping the triggers (D-8; R-5); plus a clean `downgrade`. Proved by: `tests/test_migration.py::test_baseline_upgrade_then_downgrade_then_reapply`, `tests/test_migration.py::test_schema_has_exactly_29_tables`, `tests/test_migration.py::test_engine_equivalence_partial_indexes_and_triggers`, `tests/test_migration.py::test_all_recommended_indexes_created`, `tests/test_migration.py::test_all_tables_have_uuid_pk_and_created_at`.
 
 **Checkpoint**: Full schema deliverable complete; all user stories independently functional
 
@@ -251,6 +254,28 @@ description: "Task list for the Full MVP Database Schema feature"
 
 - [ ] T036 Run the full suite on in-memory SQLite from the repository root: `.venv/bin/python -m pytest tests -q` (AGENTS.md). Must be green across all 8 story files before the feature is considered done. Proved by: the full-suite run itself.
 - [ ] T037 [P] Run the same full suite against PostgreSQL when a PG URL is configured (CI/deploy): `DATABASE_URL=postgresql+psycopg://... .venv/bin/python -m pytest tests -q` (quickstart.md; SC-010). Locally, with no PG URL, the PostgreSQL variants skip (they do not fail). Proved by: the full-suite run against `db_engine`'s PostgreSQL parameter.
+
+---
+
+## Phase 12: Design B amendments (docs/04 0.9.0)
+
+**Goal**: Amend the built US4 schema to Design B (`docs/04` 0.9.0): `transaction` drops `tenancy_id`, `matching_status` and the `(tenancy_id)` index, the stored enum set swaps `matching_status` for `match_type`, and the append-only `transaction_match` table is added, bringing the append-only set to 8 tables.
+
+**Independent Test**: Run `tests/test_transaction_match.py` and the amended `tests/test_ledgers_billing.py`; the `transaction_match` columns, CHECKs, partial unique index, indexes and append-only trigger hold on both engines, and `transaction` carries no tenancy or matching-status columns.
+
+**Requirements**: FR-012, FR-016, FR-019, FR-020, FR-021, FR-027.
+
+### Tests for Design B (write FIRST, ensure they FAIL) ⚠️
+
+- [ ] T038 [P] [US4] Write `tests/test_transaction_match.py` (`db_engine`, both engines): `test_transaction_match_table_exists_with_columns` (columns and nullability per `docs/04` §6.5; no `updated_at`), `test_match_type_check_rejects_unknown`, `test_reversal_requires_reverses_match_id`, `test_non_reversal_rejects_reverses_match_id`, `test_reverses_match_id_unique_partial_index` (a second reversal of the same match is rejected; several NULLs allowed; partial predicate present on both engines), `test_transaction_match_foreign_keys`, `test_transaction_match_indexes_exist`, `test_transaction_match_append_only` (UPDATE and DELETE rejected by the trigger, asserting the trigger's own message, not a foreign-key error), `test_transaction_has_no_tenancy_id_or_matching_status_columns`.
+- [ ] T039 [US4] Amend `tests/test_ledgers_billing.py` (the T021 tests): remove assertions and tests for `transaction.tenancy_id`, `transaction.matching_status` (including its default) and the `transaction` `(tenancy_id)` index; make the immutability tests cover the 8 append-only tables.
+
+### Implementation for Design B
+
+- [ ] T040 [US4] Amend the `transaction` model in `backend/src/models/ledgers_billing.py` (T023): delete the `tenancy_id` and `matching_status` columns and the `(tenancy_id)` index; change nothing else.
+- [ ] T041 [US4] Add the `transaction_match` model in `backend/src/models/ledgers_billing.py` verbatim per `docs/04` §6.5 (columns, the two CHECKs, the partial unique index on `reverses_match_id` with both `sqlite_where` and `postgresql_where`, indexes `(transaction_id, created_at)` and `(tenancy_id)`); in `backend/src/enums.py` (T004) remove `matching_status` and add `match_type` (`automatic | manual | reversal`, TEXT + CHECK); register `transaction_match` with the shared immutable-trigger DDL (T025) so it covers all 8 append-only tables; export it from `backend/src/models/__init__.py`.
+
+**Checkpoint**: US4 amended to Design B; both ledgers and the match history are independently testable
 
 ---
 
@@ -266,6 +291,7 @@ description: "Task list for the Full MVP Database Schema feature"
   - US7 depends on US1–US6 (it seeds rows across them).
   - US8 packages US1–US7.
 - **Polish (Phase 11)**: Depends on all desired stories being complete.
+- **Design B amendments (Phase 12)**: Depend on T023 to T025; T038 and T039 come before T040 and T041; the baseline migration (T035) must include `transaction_match`.
 
 ### Within Each User Story
 

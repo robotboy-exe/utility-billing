@@ -31,7 +31,7 @@ Tests are one file per user story: `tests/test_identity.py` (US1), `test_tenancy
 ## Validation scenarios
 
 ### 1. Fresh schema + reversibility (SC-001, SC-008, SC-010)
-- Apply `upgrade head` from empty; all 28 tables, indexes, constraints, partial indexes, and triggers exist (`docs/04` §6, §9).
+- Apply `upgrade head` from empty; all 29 tables, indexes, constraints, partial indexes, and triggers exist (`docs/04` §6, §9).
 - `downgrade base` then `upgrade head` again → clean, no leftover objects.
 - Structural equivalence: the same suite passes on SQLite and PostgreSQL (PostgreSQL in CI). Table/constraint parity is asserted.
 
@@ -42,7 +42,7 @@ Tests are one file per user story: `tests/test_identity.py` (US1), `test_tenancy
 - `amount_minor` round-trips as an integer with no float loss; `currency` defaults to `NGN`; a negative magnitude is rejected (CHECK) where `docs/04` requires `>= 0`.
 
 ### 4. Immutability of financial tables (SC-003; Principle I)
-- Insert a row into each of the seven immutable tables, then attempt `UPDATE` and `DELETE`; both are rejected by **database triggers on SQLite and PostgreSQL** (R-5).
+- Insert a row into each of the eight immutable tables, then attempt `UPDATE` and `DELETE`; both are rejected by **database triggers on SQLite and PostgreSQL** (R-5).
 
 ### 5. Commissions never stored (SC-006; Principle III)
 - Attempt to stage/insert a row whose channel maps to `COMMISSION` → rejected (CHECK on `transaction`/`staged_import_row`, or `excluded` routing), never persisted or logged.

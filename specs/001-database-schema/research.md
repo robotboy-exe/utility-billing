@@ -33,14 +33,14 @@ Each item below was called out in the plan input and records a one-line rational
 
 ### R-4 — Partial unique indexes declared for both engines
 
-- **Decision**: partial unique indexes are declared with **both** `sqlite_where` and `postgresql_where` — `tenancy` (`UNIQUE (room_id) WHERE status = 'active'`; `docs/04` §6.3, §8.5), `import_batch` (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`; `docs/04` §6.7, §10.2), and `billing_config` (`UNIQUE (organization_id) WHERE property_id IS NULL`; `docs/04` §6.4). All three are registered in `docs/04` §9 and §13 item 4, which specify `sqlite_where` locally and `postgresql_where` in production.
+- **Decision**: partial unique indexes are declared with **both** `sqlite_where` and `postgresql_where` — `tenancy` (`UNIQUE (room_id) WHERE status = 'active'`; `docs/04` §6.3, §8.5), `import_batch` (`UNIQUE (statement_fingerprint) WHERE status IN ('confirmed','completed')`; `docs/04` §6.7, §10.2), `billing_config` (`UNIQUE (organization_id) WHERE property_id IS NULL`; `docs/04` §6.4), and `transaction_match` (`UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL`; `docs/04` §6.5, §8.11). The first three are registered in `docs/04` §9 and §13 item 4, which specify `sqlite_where` locally and `postgresql_where` in production; the fourth is defined in `docs/04` §6.5 and uses the same pair.
 - **Rationale**: SQLite has supported partial indexes since 3.8.0, so both engines enforce the invariants natively and they are verifiable locally, replacing the earlier PostgreSQL-only/app-layer divergence.
 - **Cost of changing later**: drop and recreate the indexes on both engines and re-verify; any stopgap app-layer guard must be removed.
 - **Alternatives considered**: PostgreSQL-only partial index plus a SQLite application-layer guard (weaker, service-layer tested only — the previous approach); a composite `(room_id, status)` index (wrongly blocks historical closed tenancies).
 
 ### R-5 — Immutable tables blocked by triggers on both engines from one shared DDL
 
-- **Decision**: the seven immutable tables (`docs/04` §11.1 — `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`) are protected against in-place `UPDATE`/`DELETE` by database triggers on **both** engines, and the trigger DDL is defined **once** in a shared helper that is emitted both by SQLAlchemy events during `metadata.create_all()` and by the Alembic baseline migration, so tests and migrations cannot differ.
+- **Decision**: the eight immutable tables (`docs/04` §11.1 — `transaction`, `transaction_match`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`) are protected against in-place `UPDATE`/`DELETE` by database triggers on **both** engines, and the trigger DDL is defined **once** in a shared helper that is emitted both by SQLAlchemy events during `metadata.create_all()` and by the Alembic baseline migration, so tests and migrations cannot differ.
 - **Feasibility**: **feasible.** SQLite uses `CREATE TRIGGER ... BEFORE UPDATE/DELETE ... BEGIN SELECT RAISE(ABORT, '...'); END;`. PostgreSQL uses one shared `CREATE OR REPLACE FUNCTION` returning `trigger` plus per-table `CREATE TRIGGER ... EXECUTE FUNCTION`. Both forms are produced by the same Python helper, branched by dialect.
 - **Rationale**: a single DDL source means the SQLite triggers exercised by tests and the PostgreSQL triggers applied by the migration are literally the same definition (`docs/04` §11.1; constitution Principle I; spec FR-016, SC-003).
 - **Cost of changing later**: triggers must be dropped/recreated in a migration; editing the guard means editing the shared DDL and re-running both paths; a future per-table mutable exception requires parameterizing the helper.
@@ -74,7 +74,7 @@ Each item below was called out in the plan input and records a one-line rational
 
 ### R-10 — Migration packaging
 
-- **Decision**: one reversible baseline migration creating all 28 tables, constraints, indexes, partial unique indexes (R-4), and triggers (R-5), in FK creation order.
+- **Decision**: one reversible baseline migration creating all 29 tables, constraints, indexes, partial unique indexes (R-4), and triggers (R-5), in FK creation order.
 - **Rationale**: nothing is deployed yet, so per-module splitting buys no benefit; one baseline keeps up/down deterministic (`docs/04` §12; `docs/03` §6.6).
 - **Alternatives considered**: one migration per domain (pre-deployment over-engineering).
 

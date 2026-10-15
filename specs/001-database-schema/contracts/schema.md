@@ -35,7 +35,7 @@ Contract rules:
 - `tenancy_status`: `draft | active | closed`
 - `record_category`: `tenant_payment | utility_bill_payment` (persisted only)
 - `direction`: `credit | debit`
-- `matching_status`: `unmatched | ambiguous | matched | manually_matched | not_applicable`
+- `match_type`: `automatic | manual | reversal`
 - `allocation_type`: `automatic | manual | correction | reversal`
 - `advance_movement_type`: `created | applied | reversed`
 - `import_batch_status`: `parsing | staged | duplicate_statement | totals_mismatch | confirmed | rejected | completed | failed`
@@ -58,6 +58,7 @@ Column/constraint definitions live in `docs/04` §6; the contract is that each i
 | `billing_override` | `(tenancy_id, billing_month)` UNIQUE; `CHECK decision IN ('bill','skip')` | One bill/skip decision per tenancy-month |
 | `monthly_bill` | `(tenancy_id, billing_month)` UNIQUE | One bill per tenancy per month (I-6) |
 | `transaction` | `duplicate_key` UNIQUE; `CHECK record_category IN ('tenant_payment','utility_bill_payment')` | Row de-dup; commissions never stored (I-4) |
+| `transaction_match` | `CHECK match_type IN ('automatic','manual','reversal')`; CHECK reversal rows carry `reverses_match_id` and non-reversal rows do not; partial unique `UNIQUE (reverses_match_id) WHERE reverses_match_id IS NOT NULL`; indexes `(transaction_id, created_at)`, `(tenancy_id)` | Append-only match history; a match can be reversed at most once |
 | `utility_bill_payment` | `transaction_id` UNIQUE | One provider-payment per source transaction |
 | `import_channel_category_mapping` | `UNIQUE (import_profile_id, channel, COALESCE(direction,'ANY'))`; `CHECK category IN (...)` | Mapping is configuration, not code |
 | `import_batch` | `totals_status` + partial unique (see §4) | Control totals compared in memory and discarded |
@@ -79,7 +80,7 @@ SQLite supports partial indexes (since 3.8.0); there is **no** engine divergence
 
 ## 5. Immutability (append-only) contract
 
-The following tables are append-only (`docs/04` §11.1): `transaction`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`.
+The following tables are append-only (`docs/04` §11.1): `transaction`, `transaction_match`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `utility_bill_payment`, `audit_log`.
 
 - **Both engines** reject in-place `UPDATE`/`DELETE` with triggers (R-5): PostgreSQL via a shared `trigger` function + per-table triggers, SQLite via `BEFORE UPDATE`/`BEFORE DELETE` triggers that `RAISE(ABORT, ...)`.
 - The trigger DDL is defined **once** and emitted both by `metadata.create_all()` (tests) and by the Alembic baseline (migration), so the two paths cannot differ.
