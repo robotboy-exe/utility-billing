@@ -17,7 +17,7 @@ from ..enums import (
     BILL_ADJUSTMENT_TYPE,
     BILLING_OVERRIDE_DECISION,
     DIRECTION,
-    MATCHING_STATUS,
+    MATCH_TYPE,
     RECORD_CATEGORY,
     enum_check,
 )
@@ -121,9 +121,7 @@ class Transaction(IdCreatedAt, Base):
     __table_args__ = (
         enum_check("record_category", RECORD_CATEGORY),
         enum_check("direction", DIRECTION),
-        enum_check("matching_status", MATCHING_STATUS),
         sa.Index("ix_transaction_org_date", "organization_id", "transaction_date"),
-        sa.Index("ix_transaction_tenancy", "tenancy_id"),
         sa.Index("ix_transaction_batch", "import_batch_id"),
         sa.Index("ix_transaction_category", "record_category"),
     )
@@ -153,19 +151,54 @@ class Transaction(IdCreatedAt, Base):
     counterparty_reference: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     amount_minor: Mapped[int] = money("amount_minor", positive=True)
     currency: Mapped[str] = currency()
-    tenancy_id: Mapped[uuid.UUID | None] = mapped_column(
+    duplicate_key: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+
+
+class TransactionMatch(IdCreatedAt, Base):
+    """Append-only matching history; status is derived from these rows (docs/04 §6.5, §7.9, §11.1)."""
+
+    __tablename__ = "transaction_match"
+    __table_args__ = (
+        enum_check("match_type", MATCH_TYPE),
+        sa.CheckConstraint(
+            "(match_type = 'reversal' AND reverses_match_id IS NOT NULL) "
+            "OR (match_type <> 'reversal' AND reverses_match_id IS NULL)",
+            name="ck_transaction_match_reversal_reference",
+        ),
+        sa.Index(
+            "uq_transaction_match_reverses",
+            "reverses_match_id",
+            unique=True,
+            sqlite_where=sa.text("reverses_match_id IS NOT NULL"),
+            postgresql_where=sa.text("reverses_match_id IS NOT NULL"),
+        ),
+        sa.Index("ix_transaction_match_transaction_created", "transaction_id", "created_at"),
+        sa.Index("ix_transaction_match_tenancy", "tenancy_id"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        sa.ForeignKey("organization.id"),
+        nullable=False,
+    )
+    transaction_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        sa.ForeignKey("transaction.id"),
+        nullable=False,
+    )
+    tenancy_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid,
         sa.ForeignKey("tenancy.id"),
+        nullable=False,
+    )
+    match_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    reverses_match_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid,
+        sa.ForeignKey("transaction_match.id"),
         nullable=True,
         default=None,
     )
-    matching_status: Mapped[str] = mapped_column(
-        sa.Text,
-        nullable=False,
-        default="unmatched",
-        server_default=sa.text("'unmatched'"),
-    )
-    duplicate_key: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+    note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class MonthlyBill(IdCreatedAt, UpdatedAt, Base):

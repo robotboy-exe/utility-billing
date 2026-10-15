@@ -16,7 +16,7 @@ from ..enums import (
     TOTALS_STATUS,
     enum_check,
 )
-from .base import Base, IdCreatedAt, UpdatedAt, UTCDateTime, currency, money
+from .base import Base, IdCreatedAt, UpdatedAt, UTCDateTime, currency, jsonb, money
 
 
 class ImportProfile(IdCreatedAt, UpdatedAt, Base):
@@ -31,9 +31,9 @@ class ImportProfile(IdCreatedAt, UpdatedAt, Base):
     code: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     source_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    detection_config: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
-    parse_config: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
-    file_limits: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
+    detection_config: Mapped[dict | None] = mapped_column(jsonb(), nullable=True)
+    parse_config: Mapped[dict | None] = mapped_column(jsonb(), nullable=True)
+    file_limits: Mapped[dict | None] = mapped_column(jsonb(), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         sa.Boolean,
         nullable=False,
@@ -107,7 +107,7 @@ class ImportBatch(IdCreatedAt, UpdatedAt, Base):
     currency: Mapped[str] = currency()
     totals_status: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     statement_fingerprint: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    ignored_summary: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
+    ignored_summary: Mapped[dict | None] = mapped_column(jsonb(), nullable=True)
     tenant_payment_row_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     tenant_payment_total_minor: Mapped[int | None] = mapped_column(
         sa.BigInteger, nullable=True

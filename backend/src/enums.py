@@ -11,13 +11,7 @@ import sqlalchemy as sa
 TENANCY_STATUS = ("draft", "active", "closed")
 RECORD_CATEGORY = ("tenant_payment", "utility_bill_payment")
 DIRECTION = ("credit", "debit")
-MATCHING_STATUS = (
-    "unmatched",
-    "ambiguous",
-    "matched",
-    "manually_matched",
-    "not_applicable",
-)
+MATCH_TYPE = ("automatic", "manual", "reversal")
 ALLOCATION_TYPE = ("automatic", "manual", "correction", "reversal")
 ADVANCE_MOVEMENT_TYPE = ("created", "applied", "reversed")
 IMPORT_BATCH_STATUS = (

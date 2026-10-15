@@ -27,6 +27,7 @@ from backend.src.models import (
     StandardAmountChange,
     Tenancy,
     Transaction,
+    TransactionMatch,
     UtilityBillPayment,
     UtilityProvider,
 )
@@ -123,7 +124,6 @@ def _make_transaction(session: Session, org: Organization, **overrides) -> Trans
         "direction": "credit",
         "description_raw": "TRANSFER FROM JOHN OKAFOR",
         "amount_minor": 100000,
-        "matching_status": "unmatched",
         "duplicate_key": f"txn-{uuid.uuid4().hex}",
     }
     values.update(overrides)
@@ -354,12 +354,12 @@ def test_standard_amount_change_append_only(db_engine):
         session.commit()
 
         change.custom_note = "edited"
-        with pytest.raises(sa.exc.IntegrityError):
+        with pytest.raises(sa.exc.DBAPIError, match="append-only"):
             session.commit()
         session.rollback()
 
         session.delete(session.get(StandardAmountChange, change.id))
-        with pytest.raises(sa.exc.IntegrityError):
+        with pytest.raises(sa.exc.DBAPIError, match="append-only"):
             session.commit()
         session.rollback()
 
@@ -437,7 +437,6 @@ def test_utility_bill_payment_transaction_id_unique(db_engine):
             session,
             org,
             record_category="utility_bill_payment",
-            matching_status="not_applicable",
             channel="BEDC",
             direction="debit",
         )
@@ -479,7 +478,6 @@ def test_two_ledger_separation_has_no_cross_settle_paths(db_engine):
     assert "tenancy_id" not in payment_columns
     assert "matching_status" not in payment_columns
     assert "monthly_bill_id" not in payment_columns
-
     payment_fks = {
         fk.column.table.name for fk in UtilityBillPayment.__table__.foreign_keys
     }
@@ -497,7 +495,6 @@ def test_two_ledger_separation_has_no_cross_settle_paths(db_engine):
             session,
             org,
             record_category="utility_bill_payment",
-            matching_status="not_applicable",
             channel="BEDC",
             direction="debit",
         )
@@ -603,7 +600,6 @@ def _build_immutable_row(session: Session, table: str, tag: str):
             org,
             duplicate_key=f"imm-{tag}",
             record_category="utility_bill_payment",
-            matching_status="not_applicable",
             channel="BEDC",
             direction="debit",
         )
@@ -627,12 +623,23 @@ def _build_immutable_row(session: Session, table: str, tag: str):
         return _make_allocation(session, txn, bill, 40000)
     if table == "advance_movement":
         return _make_advance(session, org, tenancy, txn, "created", 60000)
+    if table == "transaction_match":
+        match = TransactionMatch(
+            organization_id=org.id,
+            transaction_id=txn.id,
+            tenancy_id=tenancy.id,
+            match_type="automatic",
+        )
+        session.add(match)
+        session.commit()
+        return match
     raise AssertionError(f"no builder for {table}")
 
 
 def test_immutable_financial_tables_reject_update_and_delete(db_engine):
     assert set(IMMUTABLE_TABLES) == {
         "transaction",
+        "transaction_match",
         "payment_allocation",
         "advance_movement",
         "bill_adjustment",
@@ -642,6 +649,7 @@ def test_immutable_financial_tables_reject_update_and_delete(db_engine):
     }
     update_targets = {
         "transaction": ("description_raw", "edited description"),
+        "transaction_match": ("note", "edited note"),
         "payment_allocation": ("allocation_type", "manual"),
         "advance_movement": ("note", "edited note"),
         "bill_adjustment": ("custom_note", "edited note"),
@@ -654,12 +662,12 @@ def test_immutable_financial_tables_reject_update_and_delete(db_engine):
             row_id = row.id
             column, new_value = update_targets[table]
             setattr(row, column, new_value)
-            with pytest.raises(sa.exc.IntegrityError):
+            with pytest.raises(sa.exc.DBAPIError, match="append-only"):
                 session.commit()
             session.rollback()
 
             session.delete(session.get(type(row), row_id))
-            with pytest.raises(sa.exc.IntegrityError):
+            with pytest.raises(sa.exc.DBAPIError, match="append-only"):
                 session.commit()
             session.rollback()
 
@@ -754,7 +762,7 @@ def test_allocation_cap_enforceable_from_columns(db_engine):
 def test_advance_reconciliation_identity_from_records(db_engine):
     with Session(db_engine) as session:
         org, tenancy = _make_chain(session)
-        txn = _make_transaction(session, org, amount_minor=100000, tenancy_id=tenancy.id)
+        txn = _make_transaction(session, org, amount_minor=100000)
         bill_jan = _make_bill(session, org, tenancy, JAN)
         bill_feb = _make_bill(session, org, tenancy, FEB)
 
@@ -826,7 +834,6 @@ def test_recommended_indexes_exist(db_engine):
     expected = {
         "transaction": [
             ("organization_id", "transaction_date"),
-            ("tenancy_id",),
             ("import_batch_id",),
             ("record_category",),
         ],
@@ -884,28 +891,6 @@ def test_org_scoping_columns_present(db_engine):
         "bill_adjustment",
     ]:
         assert "organization_id" not in {c["name"] for c in inspector.get_columns(table)}, table
-
-
-def test_transaction_matching_status_check_rejects_unknown(db_engine):
-    with Session(db_engine) as session:
-        org = _make_org(session)
-        session.add(
-            Transaction(
-                organization_id=org.id,
-                record_category="tenant_payment",
-                source="manual",
-                transaction_date=date(2026, 1, 5),
-                channel="FUNDING",
-                direction="credit",
-                description_raw="TRANSFER",
-                amount_minor=100000,
-                matching_status="bogus",
-                duplicate_key="txn-matching-1",
-            )
-        )
-        with pytest.raises(sa.exc.IntegrityError):
-            session.commit()
-        session.rollback()
 
 
 def test_payment_allocation_allocation_type_check_rejects_unknown(db_engine):
@@ -1001,7 +986,6 @@ def test_timestamps_round_trip_as_utc(db_engine):
             direction="debit",
             description_raw="BEDC PAYMENT",
             amount_minor=25000,
-            matching_status="not_applicable",
             duplicate_key=f"txn-utc-u-{uuid.uuid4().hex[:8]}",
         )
         session.add(utility_txn)

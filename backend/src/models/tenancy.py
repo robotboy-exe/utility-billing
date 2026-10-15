@@ -88,7 +88,14 @@ class Tenant(IdCreatedAt, UpdatedAt, Base):
 
 class SenderAlias(IdCreatedAt, UpdatedAt, Base):
     __tablename__ = "sender_alias"
-    __table_args__ = (sa.UniqueConstraint("tenancy_id", "normalized_name"),)
+    __table_args__ = (
+        sa.UniqueConstraint("tenancy_id", "normalized_name"),
+        sa.Index(
+            "ix_sender_alias_organization_id_normalized_name",
+            "organization_id",
+            "normalized_name",
+        ),
+    )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid,

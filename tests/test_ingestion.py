@@ -284,11 +284,17 @@ def test_staged_row_duplicate_key_not_unique(db_engine):
 
 
 def test_commission_channel_never_staged_or_persisted(db_engine):
+    """The schema rejects the non-persisted `commission` category in both
+    `staged_import_row` and `transaction` via their category CHECKs. The
+    channel-level commission ban (docs/04 §8 item 4) is a service-layer rule,
+    not a schema constraint, so this test proves only the category CHECKs and
+    that a COMMISSION channel may be mapped to `excluded`."""
     from backend.src.models.ledgers_billing import Transaction
 
     with Session(db_engine) as session:
         organization = _make_organization(session)
         profile = _make_profile(session)
+        # The schema permits configuring a COMMISSION channel as `excluded`.
         session.add(
             ImportChannelCategoryMapping(
                 import_profile_id=profile.id,
@@ -306,6 +312,7 @@ def test_commission_channel_never_staged_or_persisted(db_engine):
         assert mapping.category == "excluded"
 
         batch = _make_batch(session, organization, profile)
+        # `commission` is not a persistable staged-row category.
         session.add(
             StagedImportRow(
                 import_batch_id=batch.id,
@@ -323,6 +330,7 @@ def test_commission_channel_never_staged_or_persisted(db_engine):
             session.commit()
         session.rollback()
 
+        # `commission` is not a persistable transaction category either.
         session.add(
             Transaction(
                 organization_id=organization.id,

@@ -19,7 +19,7 @@ from sqlalchemy import pool
 # how the alembic CLI was invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from backend.src.db import get_database_url  # noqa: E402
+from backend.src.db import enable_sqlite_foreign_keys, get_database_url  # noqa: E402
 from backend.src.models import Base  # noqa: E402
 
 config = context.config
@@ -43,6 +43,10 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     connectable = sa.create_engine(get_database_url(), poolclass=pool.NullPool)
+    if connectable.dialect.name == "sqlite":
+        # Alembic's own engine must enforce foreign keys exactly like the app
+        # engine (db.py) so migrations and create_all behave identically.
+        enable_sqlite_foreign_keys(connectable)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,

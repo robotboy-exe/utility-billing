@@ -1,6 +1,12 @@
 """ORM models: shared base infrastructure plus the domain modules."""
 
 from .base import Base
+from .audit import (
+    AdminLoginAttempt,
+    AdminSession,
+    AuditLog,
+    TenantLoginAttempt,
+)
 from .identity import AdminUser, Organization
 from .ingestion import (
     ImportBatch,
@@ -17,9 +23,11 @@ from .ledgers_billing import (
     PaymentAllocation,
     StandardAmountChange,
     Transaction,
+    TransactionMatch,
     UtilityBillPayment,
     UtilityProvider,
 )
+from .settings import PortalSetting
 from .tenancy import (
     Property,
     Room,
@@ -31,8 +39,11 @@ from .tenancy import (
 )
 
 __all__ = [
+    "AdminLoginAttempt",
+    "AdminSession",
     "AdminUser",
     "AdvanceMovement",
+    "AuditLog",
     "Base",
     "BillAdjustment",
     "BillingConfig",
@@ -43,6 +54,7 @@ __all__ = [
     "MonthlyBill",
     "Organization",
     "PaymentAllocation",
+    "PortalSetting",
     "Property",
     "Room",
     "SenderAlias",
@@ -51,8 +63,10 @@ __all__ = [
     "Tenancy",
     "Tenant",
     "TenantAccessCredential",
+    "TenantLoginAttempt",
     "TenantSession",
     "Transaction",
+    "TransactionMatch",
     "UtilityBillPayment",
     "UtilityProvider",
 ]

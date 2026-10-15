@@ -21,6 +21,20 @@ def get_database_url() -> str:
     return os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
+def enable_sqlite_foreign_keys(engine: sa.Engine) -> None:
+    """SQLite does not enforce foreign keys unless requested per connection.
+
+    Shared by app engines (``create_db_engine``) and Alembic's engine
+    (``migrations/env.py``) so both enforce the schema identically.
+    """
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 def create_db_engine(url: str | None = None) -> sa.Engine:
     resolved = url or get_database_url()
     if resolved.startswith("sqlite"):
@@ -29,14 +43,7 @@ def create_db_engine(url: str | None = None) -> sa.Engine:
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-
-        # SQLite does not enforce foreign keys unless requested per connection.
-        @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
+        enable_sqlite_foreign_keys(engine)
         return engine
     return sa.create_engine(resolved)
 

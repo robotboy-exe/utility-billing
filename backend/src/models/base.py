@@ -16,6 +16,7 @@ from typing import Iterable
 
 import sqlalchemy as sa
 from sqlalchemy import event
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -114,8 +115,18 @@ def currency(column_name: str = "currency") -> sa.Column:
     )
 
 
+def jsonb() -> sa.types.TypeEngine:
+    """JSON column rendered as JSONB on PostgreSQL and JSON on SQLite (docs/04).
+
+    ``sa.JSON`` alone renders JSON on PostgreSQL; the variant pins the
+    documented JSONB type for the production engine.
+    """
+    return sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+
+
 IMMUTABLE_TABLES: tuple[str, ...] = (
     "transaction",
+    "transaction_match",
     "payment_allocation",
     "advance_movement",
     "bill_adjustment",
@@ -139,20 +150,26 @@ def immutable_trigger_create_sql(
 ) -> list[str]:
     """Per-engine trigger SQL blocking UPDATE/DELETE on the append-only tables (R-5).
 
-    One DDL source for both engines; ``tables`` defaults to every immutable
-    table (migration path) and is filtered by existence on the create_all path.
+    One DDL source for both engines. ``tables`` defaults to the immutable tables
+    that actually exist in ``Base.metadata`` (so ``audit_log`` is included only
+    once its model is registered); when ``tables`` is given it is intersected
+    with the immutable set. This keeps the function usable both before and after
+    every immutable table is added.
     """
     if tables is None:
-        names = list(IMMUTABLE_TABLES)
+        present = set(Base.metadata.tables.keys())
     else:
         present = set(tables)
-        names = [name for name in IMMUTABLE_TABLES if name in present]
+    names = [name for name in IMMUTABLE_TABLES if name in present]
     if not names:
         return []
 
     if dialect_name == "postgresql":
         statements = [_PG_GUARD_FUNCTION]
         for table in names:
+            # DROP before CREATE makes a second create_all idempotent on
+            # PostgreSQL (CREATE OR REPLACE only covers the function).
+            statements.append(f'DROP TRIGGER IF EXISTS trg_{table}_immutable ON "{table}"')
             statements.append(
                 f'CREATE TRIGGER trg_{table}_immutable '
                 f'BEFORE UPDATE OR DELETE ON "{table}" '
@@ -215,6 +232,7 @@ __all__ = [
     "currency",
     "immutable_trigger_create_sql",
     "immutable_trigger_drop_sql",
+    "jsonb",
     "money",
     "utcnow",
 ]
