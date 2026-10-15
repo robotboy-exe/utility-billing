@@ -1015,7 +1015,12 @@ def test_timestamps_round_trip_as_utc(db_engine):
             sa.bindparam("id", value=movement.id, type_=sa.Uuid)
         )
         raw = session.execute(query).scalar()
-        assert "2026-03-10 13:30" in str(raw)
+        if isinstance(raw, datetime):
+            # PostgreSQL returns TIMESTAMPTZ in the session TimeZone; the stored
+            # instant is what matters.
+            assert raw.astimezone(timezone.utc) == occurred.astimezone(timezone.utc)
+        else:
+            assert "2026-03-10 13:30" in str(raw)
 
         validity = sa.text("SELECT :now > :occurred").bindparams(
             sa.bindparam("now", value=paid, type_=UTCDateTime),
