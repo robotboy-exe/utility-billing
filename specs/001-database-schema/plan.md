@@ -102,7 +102,7 @@ backend/
         └── versions/
             └── 0001_initial_schema.py   # single reversible baseline [US8]
 tests/
-├── conftest.py                  # in-memory SQLite per test (PostgreSQL via DATABASE_URL in CI)
+├── conftest.py                  # in-memory SQLite per test (PostgreSQL via TEST_DATABASE_URL in CI)
 ├── test_identity.py             # US1
 ├── test_tenancy.py              # US2
 ├── test_ingestion.py            # US3

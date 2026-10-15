@@ -287,8 +287,9 @@ def test_staged_row_rejects_unrecognized_parse_status(db_engine):
                 parse_status="unrecognized",
             )
         )
-        with pytest.raises(sa.exc.IntegrityError):
+        with pytest.raises(sa.exc.IntegrityError) as excinfo:
             session.commit()
+        assert "ck_parse_status_values" in str(excinfo.value)
         session.rollback()
 
 

@@ -29,7 +29,7 @@ TOTALS_STATUS = ("valid", "mismatch", "missing")
 # Inline value sets from docs/04 §6 (research.md R-1).
 BILLING_OVERRIDE_DECISION = ("bill", "skip")
 BILL_ADJUSTMENT_TYPE = ("rate_change", "write_off")
-STAGED_ROW_PARSE_STATUS = ("valid", "duplicate", "invalid", "unrecognized")
+STAGED_ROW_PARSE_STATUS = ("valid", "duplicate", "invalid")
 AUDIT_ACTOR_TYPE = ("admin", "system", "tenant_session")
 CHANNEL_CATEGORY = (
     "tenant_payment",
