@@ -52,3 +52,5 @@ Version 0.10.3 reconciles §6.4, §8.2, §5.3 and wording with 09, 10 and the ow
 Version 0.10.4 aligns the timezone and spend-report terms with 04, 05, 06 and ADR-028; no decisions change.
 
 Version 0.10.5 Transaction Match entity and match-record wording added to align with 04 0.9.0.
+
+Version 0.11.0 A rate change applies to every current-month bill of an active tenancy, paid or not, never to past months or closed tenancies; the property view and the admin per-room amounts show outstanding as two amounts (earlier months, this month) and "No charge this month"; the admin dashboard shows the outstanding balance of closed tenancies as a separate total with a per-tenancy list; ADR-010, ADR-023 and ADR-027 revised, index rows updated.

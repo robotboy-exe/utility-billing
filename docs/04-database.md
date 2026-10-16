@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.10.0`
+Version: `0.11.0`
 Status: Draft — design phase
-Last Updated: 2026-10-15
+Last Updated: 2026-10-16
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Unrecognized rows (channel with no mapping) are no longer staged; their details are kept as a JSON list in the new nullable `import_batch.unrecognized_rows` (admin sees only `unrecognized_row_count` by default); `unrecognized` removed from `staged_import_row.parse_status` and its CHECK.
+Changes in this version: Derived bill status gains "written_off" and "no_charge" with a was_written_off flag; rate-change note: every current-month bill of an active tenancy, paid or not (past months and closed tenancies untouched; a drop below paid becomes advance); outstanding also reported as earlier months and this month; closed-tenancy advance and complete-reversal notes; the standard amount recorded on a late-generated bill is the amount in force at the end of its month.
 
 ---
 
@@ -154,10 +154,10 @@ valid | mismatch | missing
 ### derived bill status (not stored)
 
 ```text
-unpaid | partial | paid
+unpaid | partial | paid | written_off | no_charge
 ```
 
-This is computed from allocations, never stored.
+This is computed from allocations and adjustments, never stored. A separate derived yes/no flag, `was_written_off`, is true for every bill that has a `write_off` adjustment; it is not a status (`05-billing-engine.md` Section 8.4).
 
 ---
 
@@ -472,7 +472,7 @@ Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
 - One org-wide default row per organization, enforced by the partial unique index above; per-property uniqueness is added when per-property amounts are introduced.
 - The standard amount is organization-wide and uniform across rooms. When describing the standard amount, "global" in the ADRs means org-wide; when describing utility providers and import profiles, "global" means system-wide.
-- Bills snapshot the standard amount at generation time. Changing this value does not silently rewrite existing bills; already-generated, unsettled current-month bills are adjusted only via recorded `bill_adjustment` rows, while settled bills and past months are never adjusted.
+- Each bill records the standard amount in force for its month: the amount in force at generation for the running month, and, for a bill generated late for an ended month, the amount in force at the end of that month, taken from `standard_amount_change`. Changing this value does not silently rewrite existing bills; every already-generated bill of the current month of an active tenancy, paid or not, is adjusted only via recorded `bill_adjustment` rows, while past months and closed tenancies are never adjusted by a rate change. If a lowered amount falls below what is paid on a bill, the difference becomes advance (`05-billing-engine.md` Section 5.3).
 
 #### billing_override
 
@@ -516,7 +516,7 @@ Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemp
 | effective_at | timestamptz | NOT NULL | |
 | created_at | timestamptz | NOT NULL | |
 
-Notes: append-only. One row per rate change. Drives the rate-change bill adjustments.
+Notes: append-only. One row per rate change. Drives the rate-change bill adjustments. The amount in force at a moment is the `new_amount_minor` of the latest row whose `effective_at` is before that moment; if there is no such row, it is the `previous_amount_minor` of the earliest row, or the current `billing_config` amount when there are no rows. The amount for an ended month is the amount in force at the start of the following month, so a change saved exactly at 00:00 on the 1st belongs to the new month.
 
 ---
 
@@ -597,7 +597,7 @@ Notes:
 | organization_id | UUID | FK → organization, NOT NULL | Denormalized for scoping |
 | tenancy_id | UUID | FK → tenancy, NOT NULL | |
 | billing_month | DATE | NOT NULL | First day of the month, in the org's business timezone |
-| standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | Snapshot at generation |
+| standard_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | Amount in force for the bill's month (Section 6.4) |
 | final_amount_minor | BIGINT | NOT NULL CHECK (>= 0) | After any adjustment |
 | currency | CHAR(3) | NOT NULL | Defaults to the MVP currency |
 | is_adjusted | BOOLEAN | NOT NULL DEFAULT false | |
@@ -612,7 +612,7 @@ UNIQUE (tenancy_id, billing_month)
 
 Notes:
 - One bill per tenancy per month.
-- Status (unpaid/partial/paid) is derived, not stored.
+- Status (unpaid/partial/paid/written off/no charge) is derived, not stored.
 - `final_amount_minor` may differ from `standard_amount_minor` only via a recorded adjustment.
 - MVP locks `final_amount_minor = standard_amount_minor` except through a recorded adjustment. The separate `final_amount_minor` field intentionally preserves room for future proration without a schema change.
 
@@ -966,10 +966,14 @@ A signed allocation is:
   + amount_minor  for allocation_type in (automatic, manual, correction)
   - amount_minor  for allocation_type = reversal
 
+if final_amount = 0 and the bill has a write_off adjustment → written_off
+if final_amount = 0 and the bill has no write_off adjustment → no_charge
 if net_allocated = 0                → unpaid
 if 0 < net_allocated < final_amount → partial
 if net_allocated >= final_amount    → paid
 ```
+
+The two `final_amount = 0` rules are checked first. A part-paid bill whose unpaid part is written off has a final amount equal to what was paid and reads `paid`. The derived flag `was_written_off` is true for every bill with a `write_off` adjustment, including that one, and is supplied alongside the status (`05-billing-engine.md` Section 8.4).
 
 ### 7.2 Bill remaining due
 
@@ -982,6 +986,8 @@ remaining = final_amount_minor - net_allocated
 ```text
 outstanding = SUM(remaining) across the tenancy's bills where remaining > 0
 ```
+
+For summaries, the same sum is also reported as two amounts: `from earlier months` (bills whose month has ended in the business timezone) and `this month` (the running month's bills). Their total equals `outstanding` (no bill exists for a future month). The running month counts from the day its bill is generated; there is no due date and no "not yet due" state (`05-billing-engine.md` Section 9).
 
 ### 7.4 Advance credit (derived balance + movement log)
 
@@ -997,7 +1003,9 @@ Every change to advance credit is also written to the append-only `advance_movem
 
 Advance is always linked to its original payment because it is derived from that payment's unallocated remainder, and every movement row references that payment.
 
-Applying advance to a newly generated bill creates a `payment_allocation` from the original payment and a corresponding `applied` advance movement. No separate stored advance balance is needed.
+Applying advance to a newly generated bill, or to an existing bill after a rate change (`05-billing-engine.md` Section 7.2), creates a `payment_allocation` from the original payment and a corresponding `applied` advance movement. No separate stored advance balance is needed.
+
+A tenancy closed while holding advance keeps it recorded and visible; nothing acts on it automatically (`05-billing-engine.md` Section 7.5).
 
 ### 7.5 Advance reconciliation invariant (fraud detection)
 
@@ -1155,7 +1163,7 @@ Used to detect re-importing the same statement.
 | Same statement imported again | Flagged/rejected as duplicate statement |
 | Same row already committed | Skipped as duplicate |
 | Two identical rows in one statement | Flagged for admin review |
-| Duplicate found after commit | Handled via reversal, not deletion |
+| Duplicate found after commit | Handled by a complete reversal (allocations reversed, advance cleared, payment unmatched; `05-billing-engine.md` Section 12.1), not deletion |
 
 ---
 

@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.10.5`
+Version: `0.11.0`
 Status: Consolidated source of truth
-Last Updated: 2026-10-15
+Last Updated: 2026-10-16
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, `changelog-03.md`
 
 ---
@@ -304,7 +304,7 @@ Lazy generation (ADR-022) is one function with one contract. Detailed bill rules
 - **Idempotent by construction.** Creation is `INSERT ... ON CONFLICT (tenancy_id, billing_month) DO NOTHING`, backed by the unique constraint in `04-database.md`. Calling it twice, or concurrently, yields the same bills.
 - **Callers.** Admin dashboard load, payment allocation, import batch confirm, and admin report requests. Nothing else calls it (ADR-022).
 - **Not callers.** Tenant-session requests, including the tenant portal, are not callers (read-only, ADR-009). The portal reads existing bills and shows an "as of" date, so its figures can lag a month rollover until the next admin action.
-- **Transactions and locking.** Allocation and batch confirm each run in one database transaction. Inside it: call `ensure_bills_through`; for batch confirm, lock the `import_batch` row first and re-check its status so a double-click cannot confirm twice; lock affected tenancies in ascending id order, then each tenancy's open bills `FOR UPDATE` ordered by `billing_month`; write allocations and advance movements in the same transaction. Any failure rolls the whole unit back.
+- **Transactions and locking.** Allocation and batch confirm each run in one database transaction. Inside it: call `ensure_bills_through`; for batch confirm, lock the `import_batch` row first and re-check its status so a double-click cannot confirm twice; lock affected tenancies in ascending id order, then each tenancy's open bills `FOR UPDATE` ordered by `billing_month`; write allocations and advance movements in the same transaction. Any failure rolls the whole unit back. A rate change and a payment reversal or match correction use the same transaction and lock order (`05-billing-engine.md` Section 6.9); they are not callers of `ensure_bills_through`.
 
 *Owned by ADR-022 and `05-billing-engine.md` §6.9.*
 
@@ -713,7 +713,7 @@ Default rationale: in a small property a room label identifies a person, so per-
 | Information | Same tenancy | Other rooms (same property) | Other properties | Admin |
 |---|---|---|---|---|
 | Property/Room list & names | Visible | Visible | Hidden | Visible |
-| Property aggregates (total outstanding debt, fully-paid room count and ratio; ADR-027) | Visible | Visible | Hidden | Visible |
+| Property aggregates (total outstanding debt as two amounts; fully-paid room count and ratio, which become "No charge this month" in a no-charge month; ADR-027) | Visible | Visible | Hidden | Visible |
 | Room billing amount/status | Visible | Hidden by default; admin opt-in | Hidden | Visible |
 | Room bill adjustment notice | Visible | Org-wide rate-change notices visible; room-specific adjustments and write-offs hidden | Hidden | Visible |
 | Property utility spend | Visible | Visible | Hidden | Visible |
@@ -747,7 +747,7 @@ Two-ledger rules: §3 (ADR-017).
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Lazy and rolling through `ensure_bills_through` (§5.2.1, ADR-022).
 - **Standard amount:** Organization-wide and uniform (ADR-023). No per-room amount overrides.
-- **Adjustments:** Only an org-wide rate change (delta on unsettled current-month bills) or a debt write-off (ADR-010, ADR-025). Audited.
+- **Adjustments:** Only an org-wide rate change (the new amount applied to every current-month bill of an active tenancy, paid or not; never to past months or closed tenancies; if a bill is lowered below what is paid, the difference becomes advance) or a debt write-off (ADR-010, ADR-025). Audited.
 - **Bill/skip decisions:** `billing_override` is a per-tenancy, per-month decision to force-bill or force-skip (ADR-024). It never changes an amount.
 - **Partial months:** Move-in unbilled by default (admin may opt in); move-out billed in full by default (admin may exempt with foreknowledge or write off after closure) (ADR-024).
 - **Allocation:** Oldest-outstanding-first (ADR-020); overpayment becomes advance credit; advance balance is derived and every movement is logged and reconciled (ADR-021).
@@ -773,10 +773,11 @@ They must not maintain independent copies of financial truth.
 
 Admin reporting should include:
 
-- Rooms fully paid.
+- Rooms fully paid (not shown in a no-charge month).
 - Rooms owing.
 - Rooms with advance payments.
-- Amount owed per room.
+- Amount owed per room of its active tenancy, as two amounts: from earlier months and this month.
+- Outstanding balance of closed tenancies not yet written off, as a separate total with a list of each closed tenancy, its room, tenants, amount and months covered, on the admin dashboard (`05-billing-engine.md` Section 14.5).
 - Current-month payment status.
 - Unmatched transactions.
 - Transaction history.
@@ -789,10 +790,11 @@ Admin reporting should include:
 Tenant portal reporting should include:
 
 Property view (tenant-facing dashboard):
-- Total outstanding tenant debt across all rooms.
+- Total outstanding tenant debt across all rooms with an active tenancy, shown as two separate amounts: from earlier months and this month, with no due-date wording. The running month counts from the day its bills are generated (`05-billing-engine.md` Section 9). These are property aggregates, visible per Section 9.2, and they are as of the last bill generation, shown with the portal's "as of" date (Section 5.2.1). Example: 22 rooms at ₦4,000; on 1 August: from earlier months ₦8,000, this month ₦88,000.
 - Total room count.
 - Fully paid room count (count only, no amount).
-- Progress ratio of fully-paid rooms to total rooms, clearly labeled, e.g. "15 of 22 rooms fully paid".
+- Progress ratio of fully-paid rooms to rooms with an active tenancy, clearly labeled, e.g. "15 of 22 rooms fully paid".
+- In a no-charge month (`05-billing-engine.md` Section 9), the fully paid room count and the ratio are replaced by "No charge this month".
 - Current-month utility spend (amount paid to the utility provider / BEDC outflow for the current month).
 - Historical lookup: for any past month, the total utility spend (BEDC outflow) for that month. This is the **only** historical data exposed; historical months show the total amount only, with no room counts.
 
@@ -951,11 +953,11 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 | 020 | Chronological Oldest-Outstanding-First Allocation | Accepted | Chronological filling of bills. |
 | 021 | Advance Movement Ledger and Reconciliation | Accepted | Append-only log for advance credit auditability. |
 | 022 | Automatic Rolling Bill Generation (Lazy) (revised) | Accepted (revised) | One idempotent function, fixed callers, locking rules. |
-| 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments | Accepted | Only the org-wide standard amount is adjustable. |
+| 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments (revised) | Accepted (revised) | Only the org-wide standard amount is adjustable. |
 | 024 | Partial-Month Billing Asymmetry | Accepted | Move-in skipped by default; move-out billed. |
 | 025 | Debt Write-Offs, No Hard Deletes | Accepted | Audited zeroing of debt; no hard deletes. |
 | 026 | Closed Tenancies Lose Portal Access | Accepted | Portal credentials permanently deactivated. |
-| 027 | Property Dashboard Metrics | Accepted | Outstanding debt, room ratios, BEDC outflow. |
+| 027 | Property Dashboard Metrics (revised) | Accepted (revised) | Outstanding debt, room ratios, BEDC outflow. |
 | 028 | Business Timezone | Accepted | One business timezone for all month boundaries. |
 ---
 

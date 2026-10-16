@@ -8,7 +8,7 @@ Arbitrary per-room bill overrides are fraud-prone and are removed. Adjustments m
 
 ## Decision
 
-There are no arbitrary per-room bill amount overrides. Adjustments occur only as (a) rate-change adjustments, applied uniformly to unsettled current-month bills, or (b) debt write-offs. All adjustments are append-only, audited, preserve the original amount, carry an auto-generated public note with an optional custom note, and show the admin's identity to tenants.
+There are no arbitrary per-room bill amount overrides. Adjustments occur only as (a) rate-change adjustments, applied to every current-month bill of an active tenancy, paid or not, and never to past months or closed tenancies, or (b) debt write-offs. All adjustments are append-only, audited, preserve the original amount, carry an auto-generated public note with an optional custom note, and show the admin's identity to tenants.
 
 ## Consequences
 
