@@ -54,3 +54,5 @@ Version 0.10.4 aligns the timezone and spend-report terms with 04, 05, 06 and AD
 Version 0.10.5 Transaction Match entity and match-record wording added to align with 04 0.9.0.
 
 Version 0.11.0 A rate change applies to every current-month bill of an active tenancy, paid or not, never to past months or closed tenancies; the property view and the admin per-room amounts show outstanding as two amounts (earlier months, this month) and "No charge this month"; the admin dashboard shows the outstanding balance of closed tenancies as a separate total with a per-tenancy list; ADR-010, ADR-023 and ADR-027 revised, index rows updated.
+
+Version 0.12.0 bills move-in partial months in full by default with an admin skip opt-out and bills only active or closed tenancies from their move-in month through their move-out month (a draft tenancy is never billed); ADR-022 and ADR-024 are revised.

@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.6.0`
+Version: `0.7.0`
 Status: Draft — design phase
-Last Updated: 2026-10-16  
+Last Updated: 2026-10-21  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: A mid-month rate change sets every current-month bill of an active tenancy to the new amount, paid or not, and never touches past months or closed tenancies; a rate drop below the paid amount becomes advance; new derived statuses "Written off" and "No charge" with a was-written-off flag; payment tie-break is amount then internal id; a reversed payment or confirmed duplicate is a complete reversal; advance on a closed tenancy stays recorded; roommate changes have no effect; the running month counts as outstanding with no due label; outstanding is reported as earlier months and this month; admin report freshness note; a bill generated late for an ended month takes the amount in force at the end of that month; a room is fully paid when its active tenancy owes nothing in any month; the admin dashboard shows the outstanding balance of closed tenancies as a separate total with a per-tenancy list; rate changes and payment reversals use the allocation lock order; the fully-paid ratio counts rooms with an active tenancy.
+Changes in this version: Move-in partial months are billed in full by default with an admin skip opt-out recorded before generation; each active or closed tenancy is billed from its move-in month through its move-out month, and a draft tenancy is never billed; every payment whose allocations or movements a write touches is reconciled before commit; a late-matched payment fills only what is still open without re-ordering; one write-off action clears a closed tenancy's whole outstanding balance; a closed tenancy can pay later, matched manually, with any remainder kept as advance; closed-tenancy bills are no longer described as history.
 
 ---
 
@@ -265,7 +265,7 @@ Bills are generated **automatically and rolling** (lazy generation) by one funct
 The month is computed in the organization's business timezone (ADR-028).
 
 For that month:
-- Each active tenancy receives one bill.
+- Each active or closed tenancy is billed for every month from its move-in month through the month of its move-out date (end date), both included, and for no month after the move-out month; a tenancy with no move-out date is billed through the target month. This holds even when generation runs months after the move-out. A draft tenancy is never billed.
 - Vacant rooms do not receive bills.
 - Generation is idempotent.
 - Generation is synchronous and triggered by real usage, not a background scheduler.
@@ -289,21 +289,21 @@ Rules:
 
 There are no arbitrary per-room bill amount adjustments. The only adjustable parameter is the standard monthly amount.
 
-**Rate change:** when the standard amount changes mid-month, every bill of the current month that already exists for an active tenancy is set to the new amount by a recorded adjustment (the difference between the new and the old amount), whether the bill is unpaid, part paid or fully paid, so that a rate change applies to the running month. Bills of past months are never adjusted, and bills of closed tenancies are history and are never touched by a rate change. A rate change takes effect at the moment the admin saves it, and the current month is the business-timezone month of that moment. A bill generated later for the running month uses the new standard amount; a bill generated later for an ended month uses the amount in force at the end of that month (Section 5.2). Each adjustment is append-only, audited, carries an auto-generated public note with an optional custom note, and shows the admin's identity.
+**Rate change:** when the standard amount changes mid-month, every bill of the current month that already exists for an active tenancy is set to the new amount by a recorded adjustment (the difference between the new and the old amount), whether the bill is unpaid, part paid or fully paid, so that a rate change applies to the running month. Bills of past months are never adjusted, and the bills of closed tenancies keep their amounts and are never touched by a rate change; payments matched to a closed tenancy and write-offs are still recorded against its bills. A rate change takes effect at the moment the admin saves it, and the current month is the business-timezone month of that moment. A bill generated later for the running month uses the new standard amount; a bill generated later for an ended month uses the amount in force at the end of that month (Section 5.2). Each adjustment is append-only, audited, carries an auto-generated public note with an optional custom note, and shows the admin's identity.
 
 - **Rate rises:** a bill that was fully paid becomes part paid, and the difference is still owed. If the tenancy holds advance, normal advance application (Section 7.2) pays the difference from it. Example: July bill ₦4,000, fully paid; the rate rises to ₦5,000; the bill is now billed ₦5,000, paid ₦4,000, ₦1,000 still to pay.
 - **Rate drops:** if the new amount is lower than what is already paid on a bill, the difference is not ignored. It is taken off the bill by a reversal allocation and becomes advance credit linked to the payment it came from (one `created` advance movement for each reversal allocation, Section 7.4), following Section 11.2. If the bill was paid by more than one payment, the difference is taken from the payments in the exact reverse of the order in Section 6.2 (latest payment date/time first, then larger amount, then higher internal identifier), whatever the order in which the allocations were made. Normal advance application (Section 7.2) then applies the advance at once: to the tenancy's oldest outstanding bill first, otherwise it waits for the next bill generated.
 
-**Write-off:** when the admin foregoes a closed tenancy's debt, a write-off adjustment zeroes the outstanding balance. A write-off is possible only for a closed tenancy, and a rate change never touches it. Records are never hard-deleted.
+**Write-off:** when the admin foregoes a closed tenancy's debt, one write-off action zeroes the tenancy's whole outstanding balance by recording one write-off adjustment for every bill that still has a balance. Writing off a chosen amount or a chosen selection of bills is not supported in the MVP. A write-off is possible only for a closed tenancy, and a rate change never touches it. Records are never hard-deleted.
 
 ---
 
 ### 5.4 Mid-month occupancy
 
-Partial-month billing follows the move-in/move-out asymmetry:
-- **Move-in partial month:** not billed by default; admin can opt in to bill at the full standard amount.
+Partial-month billing:
+- **Move-in partial month:** billed in full by default; the admin can opt out (exempt) with a skip decision.
 - **Move-out partial month:** billed in full by default; admin can forego via write-off after closure, or exempt with foreknowledge.
-- A per-tenancy, per-month billing override supports both the opt-in and the exemption.
+- A per-tenancy, per-month billing override supports the exemption (the skip decision). It must be recorded before the bill is generated.
 - Proration is not automatic and not the default.
 
 ---
@@ -343,6 +343,8 @@ Ordering rules:
 No stored row order or import sequence is used. A payment with no time of day counts as the start of its date (00:00 in the business timezone).
 
 The statement source may list rows newest-first. The engine must reorder them oldest-first.
+
+A payment matched after other payments of the tenancy were allocated is processed when it is matched: it fills only what is still open, and existing allocations are not re-ordered (Section 3.4).
 
 ---
 
@@ -581,6 +583,8 @@ Every advance event is written to an append-only advance movement ledger in the 
 
 Reconciliation invariant: For each tenant payment, the derived unallocated remainder must equal the sum of `created` movements minus `applied` and `reversed` movements. If these disagree, the system flags an integrity error. This identity holds because `reversed` only ever offsets a `created` movement; undoing an `applied` movement is recorded as a new `created` movement, never as `reversed`.
 
+The engine checks this identity for every payment whose allocations or movements a write touches, before the transaction commits; on a mismatch the transaction is rolled back and an integrity error is raised. A check over all payments is not part of the MVP.
+
 This makes advance credit auditable and tamper-evident without introducing a second mutable source of truth.
 
 ---
@@ -659,17 +663,17 @@ The running month's bill counts in the outstanding balance from the day it is ge
 
 For summaries, the outstanding balance is also reported as two separate amounts: **from earlier months** (bills of months that have ended) and **this month** (the running month's bills). Their total is the outstanding balance. A room counts as fully paid when its active tenancy's outstanding balance is 0 in every month, earlier and current; a No charge bill owes nothing and does not stop a room counting as fully paid. The denominator of the fully-paid ratio is the number of rooms that have an active tenancy; vacant rooms are not counted in it. Example: 22 rooms at ₦4,000; on 1 August the summary shows from earlier months ₦8,000 and this month ₦88,000.
 
-A month is a no-charge month when the standard amount for it is 0, judged from the standard amount and not from the bills (Section 5.2: for the running month, the amount currently in force; for an ended month, the amount in force at its end). In a no-charge month every bill of an active tenancy is No charge (Section 8.4); bills of closed tenancies keep their amounts as history. Summaries and reports show "No charge this month" instead of the fully-paid-rooms count and ratio. Money already allocated to that month's bills becomes advance (Section 5.3).
+A month is a no-charge month when the standard amount for it is 0, judged from the standard amount and not from the bills (Section 5.2: for the running month, the amount currently in force; for an ended month, the amount in force at its end). In a no-charge month every bill of an active tenancy is No charge (Section 8.4); bills of closed tenancies keep their amounts (their amounts are frozen; payments and write-offs are still recorded against them). Summaries and reports show "No charge this month" instead of the fully-paid-rooms count and ratio. Money already allocated to that month's bills becomes advance (Section 5.3).
 
 ---
 
 ## 10. Interaction with Bill Generation
 
 When bills are generated (lazily):
-- Create missing monthly bills for active tenancies.
+- Create missing monthly bills for tenancies within their billing range (Section 5.1).
 - Do not duplicate existing bills.
 - Apply any billing overrides (force-bill or force-skip).
-- Skip move-in partial months unless an override forces billing.
+- Skip a month only where a skip override exists.
 - Reconcile existing advance credits and create allocations where appropriate.
 - Update derived tenancy billing state.
 Bill generation must be safe to run repeatedly.
@@ -742,6 +746,8 @@ Matching, automatic or manual, appends a `transaction_match` row (04); a payment
 
 - The billing engine processes the payment according to the normal chronological allocation rules.
 - The action is audited.
+
+A payment may be matched, manually, to a closed tenancy, for example when a former tenant pays part of a debt. It fills that tenancy's outstanding bills by the normal allocation rules, oldest first; any remainder is advance credit that stays recorded on the closed tenancy (Section 7.5).
 
 Manual reallocation may be supported later, but automatic allocation is the default.
 
@@ -822,7 +828,7 @@ The billing engine must handle:
 12. Roommate changes within the same tenancy.
 13. Multiple payments with identical timestamps.
 14. Payments matched manually after initial import.
-15. Move-in partial month skipped by default, then opted in.
+15. Move-in partial month billed in full by default, with an admin opt-out.
 16. Move-out partial month billed, then written off after closure.
 17. Standard amount raised or lowered mid-month, with some current-month bills fully paid, some part paid and some unpaid.
 18. Write-off of a closed tenancy's outstanding balance.
@@ -849,8 +855,8 @@ At minimum, automated tests should cover:
 | Advance movement ledger vs derived balance | Ledger reconciles; any mismatch flagged as integrity error |
 | Standard amount raised mid-month | Every current-month bill of an active tenancy is adjusted, including fully paid ones (they become part paid); past months untouched |
 | Standard amount lowered mid-month | Every current-month bill of an active tenancy is lowered; the difference on bills paid above the new amount becomes advance; past months untouched |
-| Standard amount changed mid-month, closed tenancy | Its bills are history and are not touched |
-| Move-in partial month | Not billed by default; billed when admin opts in |
+| Standard amount changed mid-month, closed tenancy | Its bills keep their amounts and are not touched |
+| Move-in partial month | Billed in full by default; not billed when admin opts out |
 | Move-out partial month | Billed in full; write-off zeroes balance after closure |
 | Debt written off | Balance zeroed via audited adjustment; records preserved |
 
@@ -877,7 +883,7 @@ The following rules are locked for MVP:
 15. There are no arbitrary per-room bill amount overrides.
 16. A mid-month rate change sets every current-month bill of an active tenancy to the new amount, paid or not; past months and closed tenancies are never touched. If the new amount falls below what is paid on a bill, the difference becomes advance credit. The new amount applies to all following months.
 17. Rate-change adjustments carry an auto-generated public note and show the admin's identity.
-18. Move-in partial months are not billed by default; move-out partial months are billed in full by default.
+18. Move-in and move-out partial months are billed in full by default; the admin can opt a month out with a skip decision recorded before the bill is generated.
 19. Foregone debt is written off via an audited action; records are never hard-deleted.
 20. A bill whose whole amount is written off reads "Written off"; a part-paid bill whose rest is written off reads "Paid" and is flagged as written off; a bill whose final amount is 0 without a write-off (for example, the standard amount is set to 0) reads "No charge".
 21. A reversed payment or confirmed duplicate is undone completely: allocations reversed, advance cleared, payment unmatched.

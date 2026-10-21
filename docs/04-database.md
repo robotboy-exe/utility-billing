@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.11.0`
+Version: `0.11.1`
 Status: Draft — design phase
-Last Updated: 2026-10-16
+Last Updated: 2026-10-21
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Derived bill status gains "written_off" and "no_charge" with a was_written_off flag; rate-change note: every current-month bill of an active tenancy, paid or not (past months and closed tenancies untouched; a drop below paid becomes advance); outstanding also reported as earlier months and this month; closed-tenancy advance and complete-reversal notes; the standard amount recorded on a late-generated bill is the amount in force at the end of its month.
+Changes in this version: The `billing_override` Notes describe `skip` as the opt-out for a move-in or move-out month and keep `bill` as an allowed value; no schema change.
 
 ---
 
@@ -497,7 +497,7 @@ UNIQUE (tenancy_id, billing_month)
 CHECK (decision IN ('bill', 'skip'))
 ```
 
-Notes: supports the move-in opt-in (`bill`) and the move-out foreknowledge exemption (`skip`). The lazy generator consults this table before creating a bill. This is a bill/skip decision only; it never changes a bill amount. Amount changes are limited to recorded rate-change adjustments and write-offs (see `bill_adjustment`).
+Notes: the `skip` decision is the opt-out for a move-in or move-out month; `bill` stays an allowed value (no schema change). The lazy generator consults this table before creating a bill. This is a bill/skip decision only; it never changes a bill amount. Amount changes are limited to recorded rate-change adjustments and write-offs (see `bill_adjustment`).
 
 #### standard_amount_change
 
