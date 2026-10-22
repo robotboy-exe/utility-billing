@@ -100,9 +100,9 @@ This document resolves the Technical Context unknowns for implementing `docs/05-
 
 ### R-14 — M1 backfill set is date-derived, not status-derived
 
-- **Decision**: the months a tenancy must be billed for are derived from `[start_date month, end_date month]` inclusive; the tenancy's current `status` only decides the running month's eligibility.
+- **Decision**: the months a tenancy must be billed for are derived from `[start_date month, end_date month]` inclusive; every month in that range is billed in full by default, and a `skip` override recorded before generation suppresses a month (`docs/05` §5.4). The tenancy's current `status` only decides the running month's eligibility; a `draft` tenancy is never billed (`docs/05` §5.1).
 - **Rationale**: Samuel's ruling M1 requires bills through the move-out month even when the tenancy closed and nobody opened the app for months; a status-only rule would miss them.
-- **Alternatives considered**: billing only `active` tenancies (the `docs/05` §5.1 wording M1 overrides).
+- **Alternatives considered**: billing only `active` tenancies (rejected by `docs/05` §5.1, which now bills active or closed tenancies through the move-out month).
 
 ## Libraries
 
@@ -110,4 +110,4 @@ No library is added. `zoneinfo` and `datetime` are standard library; SQLAlchemy,
 
 ## Open questions
 
-The only open item is the advance-reconciliation check cadence (`docs/04` §13 item 6), which does not block this feature: the engine must compute and flag, and the cadence is an operational choice. No new open question is introduced.
+No specification question is open. Samuel's ruling S3 fixes the timing: the advance reconciliation runs before commit on every write path that changes a payment's allocations or advance movements, and there is no all-payments check in the MVP; the operational cadence beyond that remains `docs/04` §13 item 6. No new open question is introduced.

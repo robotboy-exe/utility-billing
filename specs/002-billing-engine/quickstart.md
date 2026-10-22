@@ -29,7 +29,8 @@ Tests are one file per user story: `tests/test_bill_generation.py` (US1), `test_
 ### 1. Lazy rolling generation (US1; SC-003, SC-004)
 - An active tenancy with no bills → generation creates one bill for the month; vacant rooms get none; a second call creates no duplicate (`docs/05` §5.1).
 - A tenancy moving in in March with `end_date` 20 June, untouched until a September generation → March–June bills (June in full), no July/August/September bill (Samuel's ruling M1).
-- Move-in partial month skipped by default, then created when a bill override exists; move-out partial month billed in full (`docs/05` §5.4).
+- Move-in month billed in full by default, suppressed only by a `skip` override recorded before generation; move-out partial month billed in full (`docs/05` §5.4). A `draft` tenancy is never billed (`docs/05` §5.1).
+- An admin dashboard load generates missing bills before the dashboard view runs (`docs/05` §5.1, §14.4).
 - A standard-amount change at 00:00 on the 1st → the previous month keeps the old amount, the new month takes the new amount (`docs/05` §5.2).
 - Month boundaries around 23:59/00:00 in `Africa/Lagos` and a second timezone (`docs/03` §10.4).
 
@@ -43,13 +44,14 @@ Tests are one file per user story: `tests/test_bill_generation.py` (US1), `test_
 ### 3. Adjustments (US3; SC-005, SC-006)
 - Rate rise: a fully-paid ₦4,000 bill becomes billed ₦5,000, paid ₦4,000 (`docs/05` §5.3).
 - Rate drop: the excess is reversed from the payments in the reverse §6.2 order into advance, then applied oldest-first; past months and closed tenancies untouched (`docs/05` §5.3, §11.2).
-- Write-off of a closed tenancy: standard ₦4,000, paid ₦1,000, written off ₦3,000 → final ₦1,000; history shows original, written-off and final amounts (Samuel's ruling M3; `docs/05` §8.4).
+- Write-off of a closed tenancy: one action records one `write_off` adjustment for every bill with a balance; standard ₦4,000, paid ₦1,000, written off ₦3,000 → final ₦1,000; history shows original, written-off and final amounts (Samuel's rulings M3, S5; `docs/05` §8.4, §11.1).
 - Write-off on an active tenancy is refused (`docs/05` §5.3).
 
 ### 4. Corrections and reversals (US4; SC-007, SC-010)
 - Complete reversal: allocations undone, advance cleared, payment unmatched, every affected bill owes again (`docs/05` §12.1).
 - Wrong-match correction is one transaction under the §6.9 lock order; a forced failure writes nothing (Samuel's ruling R2; `docs/04` §8.12).
 - Unmatch is refused while net allocations are non-zero; a match is never edited (`docs/05` §12, §13).
+- A manual match to a closed tenancy fills its outstanding bills oldest first; any remainder is advance that stays recorded (`docs/05` §13, §7.5; Samuel's ruling S6).
 - The serialized-lock assertion names `TEST_DATABASE_URL` and skips locally (PostgreSQL only).
 
 ### 5. Status and summaries (US5; SC-009)

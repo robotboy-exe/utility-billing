@@ -16,14 +16,14 @@ This is the callable contract the billing engine upholds: the pure-domain entry 
 |---|---|---|
 | `business_month(instant, tz)` | instant, IANA tz → `date` (first day) | `docs/03` §10.4; ADR-028 |
 | `month_starts_between(start, end)` | two dates → ordered month starts | M1 range; `docs/05` §5.4 |
-| `expected_bill_months(tenancy, target_month, overrides)` | tenancy, target → set of months to bill | US1; M1; `docs/05` §5.1, §5.4 |
+| `expected_bill_months(tenancy, target_month, overrides)` | tenancy, target → set of months to bill | Every month in range is billed in full by default; a skip override recorded before generation suppresses a month (bill never changes the amount); US1; M1; docs/05 §5.1, §5.4 |
 | `resolve_standard_amount(config, changes, month, now)` | config, change history, month → minor amount | Ended month = amount in force at start of next month; running = current (`docs/05` §5.2; `docs/04` §6.4) |
 | `order_payments(payments)` | payments → ordered payments | date/time asc, amount asc, internal id; null time = 00:00 tz (`docs/05` §6.2) |
 | `allocate(bills, payments)` | state → allocation plan + advance events | Oldest bill first; one allocation per fill; remainder → `created` (`docs/05` §6.3–6.4, §7.1) |
 | `apply_advance(bills, remainders)` | state → allocation plan + `applied` events | Oldest remainder first, oldest bill first (`docs/05` §7.2) |
 | `reverse_allocation(allocation)` | one allocation → reversal row + one `created` movement | Samuel's ruling R1; the only reversal-to-advance primitive (`docs/05` §7.4, §11.2) |
-| `rate_change_plan(bills, payments, config, changes, new_amount, now)` | state + new amount → adjustments + reversals + advance | Current-month active bills only; rise/drop semantics (`docs/05` §5.3) |
-| `write_off_plan(bill, net_allocated)` | bill + net → adjustment | `previous_amount_minor` = before, `new_amount_minor` = net allocated (Samuel's ruling M3; `docs/05` §5.3, §8.4) |
+| `rate_change_plan(bills, payments, config, changes, new_amount, now)` | state + new amount → adjustments + reversals + advance + new standard amount | Current-month active bills only; rise/drop semantics; persists the new standard amount for following months (`docs/05` §5.3) |
+| `write_off_plan(tenancy, bills, net_allocated_by_bill)` | closed tenancy + its bills + net → one adjustment per bill with a balance | Whole-tenancy action; `previous_amount_minor` = before, `new_amount_minor` = net allocated (Samuel's rulings M3 and S5; `docs/05` §5.3, §8.4, §11.1) |
 | `complete_reversal_plan(payment, allocations, movements, match)` | state → reversals + `reversed` advances + reversal match | `docs/05` §12.1; `docs/04` §8.12 |
 | `correct_match_plan(payment, allocations, movements, match, new_tenancy)` | state → reversal + unmatch + new match + allocations | Samuel's ruling R2; `docs/05` §6.9, §12, §13 |
 | `bill_status(final_amount, net_allocated, has_write_off)` | values → status | Final-0 checks first; signed net per `docs/04` §7.1 (`docs/05` §8.1–8.4) |
@@ -39,19 +39,19 @@ Every method loads its domain state, calls the pure functions, writes the plan, 
 
 | Method | Transaction & lock order | Rule |
 |---|---|---|
-| `ensure_bills_through(organization_id, month)` | call generation; lock tenancies ascending id; lock open bills by month | Generation only creates bills (no advance application here); `docs/05` §5.1, §6.9; ADR-022; idempotent against `UNIQUE (tenancy_id, billing_month)` |
-| `allocate_for_tenancy(tenancy_id)` | call `ensure_bills_through` **inside this transaction**; lock tenancy and open bills; apply existing advance on new bills; write allocations + advance movements; run `reconcile` per touched payment before commit | `docs/05` §6.9, §7.2; fail closed on a reconciliation mismatch (`docs/04` §7.5) |
+| `ensure_bills_through(organization_id, month)` | call generation; lock tenancies ascending id; lock open bills by month | Creation only creates bills; the allocation layer's extension (T013) applies existing advance to new bills, including a `closed` tenancy's own bills generated after closure (its advance pays them oldest first, any remainder stays recorded, and no other tenancy takes it — Samuel's ruling S7); `docs/05` §5.1, §6.9, §7.2, §7.5; ADR-022; idempotent against `UNIQUE (tenancy_id, billing_month)` |
+| `allocate_for_tenancy(tenancy_id)` | call `ensure_bills_through` **inside this transaction**; lock tenancy and open bills; apply existing advance on new bills, including a `closed` tenancy's own bills generated after closure (Samuel's ruling S7); write allocations + advance movements; run `reconcile` per touched payment before commit | `docs/05` §6.9, §7.2, §7.5; fail closed on a reconciliation mismatch (`docs/04` §7.5) |
 | `confirm_import_batch(batch_id)` | call `ensure_bills_through` **inside this transaction**; lock the `import_batch` row and re-check status; then allocation | `docs/03` §5.2.1 (consumes matched payments only); a double confirm allocates once |
-| `confirm_rate_change(new_amount, admin_id, note, now)` | same lock order; **no** `ensure_bills_through` | `docs/05` §5.3, §6.9 |
-| `record_write_off(bill_id, admin_id, note)` | same lock order; refuse if the tenancy is not closed | `docs/05` §5.3, §11.1 |
-| `complete_reversal(transaction_id, admin_id)` | reverse allocations (R1), append `reversed` advances, append reversal match, apply other-payment advance to bills that owe again, run `reconcile` | `docs/05` §7.2, §12.1; `docs/04` §8.12 |
-| `correct_match(transaction_id, new_tenancy_id, admin_id)` | reverse allocations, clear advance, reverse-match, new match, re-allocate, apply other-payment advance to bills that owe again, run `reconcile` | Samuel's ruling R2; `docs/05` §6.9, §7.2, §13 |
+| `confirm_rate_change(new_amount, admin_id, note, now)` | same lock order; **no** `ensure_bills_through`; persist the new standard amount, adjustments, reversals and `created`/`applied` movements; run `reconcile` for every touched payment | `docs/05` §5.3, §6.9, §7.4 |
+| `record_write_off(tenancy_id, admin_id, note)` | same lock order; refuse if the tenancy is not closed; one `write_off` adjustment per bill with a balance; one audit entry per adjustment; auto public note + optional custom note | `docs/05` §5.3, §11.1; Samuel's ruling S5 |
+| `complete_reversal(transaction_id, admin_id)` | reverse allocations (R1), append `reversed` advances, append reversal match, apply other-payment advance to bills that owe again, including a `closed` tenancy whose own advance pays its own bills generated after closure (Samuel's ruling S7), run `reconcile` | `docs/05` §7.2, §7.5, §12.1; `docs/04` §8.12 |
+| `correct_match(transaction_id, new_tenancy_id, admin_id)` | reverse allocations, clear advance, reverse-match, new match, re-allocate, apply other-payment advance to bills that owe again, including a `closed` tenancy whose own advance pays its own bills generated after closure (Samuel's ruling S7), run `reconcile`, write the audit entry in the same transaction | Samuel's ruling R2; `docs/05` §6.9, §7.2, §7.5, §13 |
 | `match_manually(transaction_id, tenancy_id, admin_id)` | append match, then allocate | `docs/05` §12, §13 |
 
 Contract rules:
 - `transaction` rows are never updated or deleted (spec FR-059; `docs/04` §11.1).
 - `monthly_bill.final_amount_minor` is written only together with its `bill_adjustment` (`docs/04` §8.7).
-- Every mutating method writes its `audit_log` entry (`docs/05` §12, §13).
+- Every mutating method writes its `audit_log` entry; a whole-tenancy write-off writes one audit entry per adjustment (`docs/05` §12, §13; `docs/04` §6.5, §6.9).
 - Every read and write filters `organization_id` (`docs/04` §8.9).
 
 ## 3. Read-only view contract (`views.py`)
@@ -64,7 +64,7 @@ Contract rules:
 | `admin_report_freshness(organization_id)` | latest `statement_end_date` among `confirmed`/`completed` batches; months ended after it (running month not flagged) | `docs/05` §14.4 |
 | `closed_tenancy_outstanding(organization_id)` | closed-tenancy total + per-tenancy list (room, tenant names/contacts, balance, months) | `docs/05` §14.5 |
 
-Views issue no INSERT/UPDATE/DELETE, so requesting one cannot change a payment or allocation (spec FR-054).
+Views issue no INSERT/UPDATE/DELETE, so a view never changes a payment or an allocation (spec FR-054, Samuel's ruling F-03). The admin adapter operations call `ensure_bills_through` before the view runs (`docs/05` §5.1, §14.4).
 
 ## 4. Concurrency contract
 
