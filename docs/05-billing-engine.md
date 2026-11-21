@@ -1,12 +1,12 @@
 # Billing Engine
 
 Document: `docs/05-billing-engine.md`  
-Version: `0.7.0`
+Version: `0.8.0`
 Status: Draft — design phase
-Last Updated: 2026-10-21  
+Last Updated: 2026-11-21  
 Related documents: `03-mvp-architecture.md`, `04-database.md`, `06-transaction-ingestion.md`
 
-Changes in this version: Move-in partial months are billed in full by default with an admin skip opt-out recorded before generation; each active or closed tenancy is billed from its move-in month through its move-out month, and a draft tenancy is never billed; every payment whose allocations or movements a write touches is reconciled before commit; a late-matched payment fills only what is still open without re-ordering; one write-off action clears a closed tenancy's whole outstanding balance; a closed tenancy can pay later, matched manually, with any remainder kept as advance; closed-tenancy bills are no longer described as history.
+Changes in this version: A closed tenancy's advance pays that tenancy's own bills generated after closure, and whatever remains stays recorded; Section 3.6 adds the billing ground rules — bills, payments and advance credit reconcile against one tenancy only, advance pays only the bills of the tenancy that owns it, and every bill is paid and reconciled unless the admin writes it off.
 
 ---
 
@@ -138,6 +138,12 @@ Reports should not maintain independent copies of financial truth.
 
 Advance credit balance is derived from payment allocations; its individual movements are additionally recorded in an append-only advance movement ledger for auditability.
 
+### 3.6 Billing ground rules
+
+1. Bills, payments and advance credit each belong to one tenancy and are reconciled against that tenancy only. A payment of one tenancy never affects a bill of another.
+2. Advance credit exists to pay the bills of the tenancy that owns it, whether that tenancy is active or closed.
+3. Every bill is to be paid and reconciled unless the admin explicitly writes it off.
+
 ---
 
 ## 4. Definitions
@@ -252,7 +258,7 @@ Possible states:
 | ₦0 | ₦1,000 | Tenant has ₦1,000 advance |
 | ₦0 | ₦0 | Tenant is fully settled |
 
-In normal operation, the engine should apply advance credit to existing outstanding bills (Section 7.2; advance left on a closed tenancy is the exception, Section 7.5), so a tenancy should usually be either owing or in advance, not both.
+In normal operation, the engine should apply advance credit to existing outstanding bills (Section 7.2; advance left on a closed tenancy pays only that tenancy's own later bills, Section 7.5), so a tenancy should usually be either owing or in advance, not both.
 
 ---
 
@@ -591,7 +597,7 @@ This makes advance credit auditable and tamper-evident without introducing a sec
 
 ### 7.5 Tenancy closed while holding advance credit
 
-When a tenancy is closed and still holds advance credit, the advance stays recorded and visible on its original payment. Nothing happens to it automatically: it is not refunded, written off or moved, and no bill of any other tenancy, including a later tenancy in the same room, takes it. It stays linked to its payment and still reconciles under Section 7.4. How the admin is alerted and how the money is returned are not decided in this document.
+When a tenancy is closed and still holds advance credit, the advance stays recorded and visible on its original payment. It is not refunded, written off or moved automatically, and no bill of any other tenancy, including a later tenancy in the same room, takes it. A bill generated for that tenancy after closure is paid from its advance by Section 7.2; what remains stays recorded. It stays linked to its payment and still reconciles under Section 7.4. How the admin is alerted and how the money is returned are not decided in this document.
 
 ---
 
@@ -859,6 +865,7 @@ At minimum, automated tests should cover:
 | Move-in partial month | Billed in full by default; not billed when admin opts out |
 | Move-out partial month | Billed in full; write-off zeroes balance after closure |
 | Debt written off | Balance zeroed via audited adjustment; records preserved |
+| Closed tenancy holding advance, bill generated after closure | Paid from that tenancy's advance; any remainder stays recorded |
 
 ---
 
@@ -874,7 +881,7 @@ The following rules are locked for MVP:
 6. Payment date does not determine billing month.
 7. The billing engine’s reconciliation is final.
 8. Advance credit is linked to the original payment.
-9. Advance credit is applied automatically to existing or newly generated bills of the same tenancy, except advance restored during a match correction or payment reversal and advance left on a closed tenancy (Sections 7.2 and 7.5).
+9. Advance credit is applied automatically to existing or newly generated bills of the same tenancy, except advance restored during a match correction or payment reversal (Section 7.2). A closed tenancy's advance pays only that tenancy's own bills generated after closure (Section 7.5).
 10. Payments and allocations are immutable historical records; a bill changes only through audited `bill_adjustment` rows.
 11. Corrections use controlled reversal/adjustment mechanisms.
 12. Utility provider payments do not settle tenant bills.
@@ -887,6 +894,6 @@ The following rules are locked for MVP:
 19. Foregone debt is written off via an audited action; records are never hard-deleted.
 20. A bill whose whole amount is written off reads "Written off"; a part-paid bill whose rest is written off reads "Paid" and is flagged as written off; a bill whose final amount is 0 without a write-off (for example, the standard amount is set to 0) reads "No charge".
 21. A reversed payment or confirmed duplicate is undone completely: allocations reversed, advance cleared, payment unmatched.
-22. Advance on a closed tenancy stays recorded and visible; nothing happens to it automatically.
+22. Advance on a closed tenancy stays recorded and visible; it is not refunded, written off or moved automatically. A bill generated for that tenancy after closure is paid from its advance (Section 7.2).
 23. A roommate change does not affect bills, payments, allocations or advance.
 24. The running month's bill counts as outstanding from the day it is generated; there is no "not yet due" label or due date.
