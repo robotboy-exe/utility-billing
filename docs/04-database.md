@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.11.1`
+Version: `0.11.2`
 Status: Draft — design phase
-Last Updated: 2026-10-21
+Last Updated: 2026-11-21
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: The `billing_override` Notes describe `skip` as the opt-out for a move-in or move-out month and keep `bill` as an allowed value; no schema change.
+Changes in this version: §7.4 realigns the closed-tenancy advance prose with `05-billing-engine.md` Sections 7.2 and 7.5 — a bill generated for that tenancy after closure is paid from its advance, and nothing else acts on it automatically; no schema change.
 
 ---
 
@@ -1005,7 +1005,7 @@ Advance is always linked to its original payment because it is derived from that
 
 Applying advance to a newly generated bill, or to an existing bill after a rate change (`05-billing-engine.md` Section 7.2), creates a `payment_allocation` from the original payment and a corresponding `applied` advance movement. No separate stored advance balance is needed.
 
-A tenancy closed while holding advance keeps it recorded and visible; nothing acts on it automatically (`05-billing-engine.md` Section 7.5).
+A tenancy closed while holding advance keeps it recorded and visible; a bill generated for that tenancy after closure is paid from its advance, and nothing else acts on it automatically (`05-billing-engine.md` Sections 7.2 and 7.5).
 
 ### 7.5 Advance reconciliation invariant (fraud detection)
 
