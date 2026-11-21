@@ -1,12 +1,12 @@
 # Database Design
 
 Document: `docs/04-database.md`
-Version: `0.11.2`
+Version: `0.12.0`
 Status: Draft — design phase
 Last Updated: 2026-11-21
 Related documents: `03-mvp-architecture.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`
 
-Changes in this version: §7.4 realigns the closed-tenancy advance prose with `05-billing-engine.md` Sections 7.2 and 7.5 — a bill generated for that tenancy after closure is paid from its advance, and nothing else acts on it automatically; no schema change.
+Changes in this version: Removes the `billing_override` table and every reference to it (the skip decision and the force-bill decision); there is no per-tenancy, per-month billing override. `bill_adjustment` write-offs now also cover the whole outstanding balance of a tenancy's move-in month bill, per `05-billing-engine.md` Section 5.3; the `bill_adjustment` schema is unchanged. A rate change does not adjust a bill that has a write-off adjustment.
 
 ---
 
@@ -187,7 +187,6 @@ AdminUser ─── Organization
                   │        └──< ImportBatch ──< StagedImportRow
                   │
                   ├── BillingConfig
-                  ├── BillingOverride
                   ├── StandardAmountChange
                   ├── PortalSetting
                   └── AuditLog
@@ -472,32 +471,7 @@ Notes:
 - MVP uses one standard amount (org-wide, `property_id` null).
 - One org-wide default row per organization, enforced by the partial unique index above; per-property uniqueness is added when per-property amounts are introduced.
 - The standard amount is organization-wide and uniform across rooms. When describing the standard amount, "global" in the ADRs means org-wide; when describing utility providers and import profiles, "global" means system-wide.
-- Each bill records the standard amount in force for its month: the amount in force at generation for the running month, and, for a bill generated late for an ended month, the amount in force at the end of that month, taken from `standard_amount_change`. Changing this value does not silently rewrite existing bills; every already-generated bill of the current month of an active tenancy, paid or not, is adjusted only via recorded `bill_adjustment` rows, while past months and closed tenancies are never adjusted by a rate change. If a lowered amount falls below what is paid on a bill, the difference becomes advance (`05-billing-engine.md` Section 5.3).
-
-#### billing_override
-
-**billing_override** — a per-tenancy, per-month decision to force-bill or force-skip.
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| id | UUID | PK | |
-| organization_id | UUID | FK → organization, NOT NULL | |
-| tenancy_id | UUID | FK → tenancy, NOT NULL | |
-| billing_month | DATE | NOT NULL | First day of month, in the org's business timezone |
-| decision | TEXT | NOT NULL | `bill` or `skip` |
-| reason | TEXT | | Optional |
-| created_by_admin_id | UUID | FK → admin_user | |
-| created_at | timestamptz | NOT NULL | |
-| updated_at | timestamptz | | |
-
-Constraints:
-
-```text
-UNIQUE (tenancy_id, billing_month)
-CHECK (decision IN ('bill', 'skip'))
-```
-
-Notes: the `skip` decision is the opt-out for a move-in or move-out month; `bill` stays an allowed value (no schema change). The lazy generator consults this table before creating a bill. This is a bill/skip decision only; it never changes a bill amount. Amount changes are limited to recorded rate-change adjustments and write-offs (see `bill_adjustment`).
+- Each bill records the standard amount in force for its month: the amount in force at generation for the running month, and, for a bill generated late for an ended month, the amount in force at the end of that month, taken from `standard_amount_change`. Changing this value does not silently rewrite existing bills; every already-generated bill of the current month of an active tenancy, paid or not (except a bill that has a write-off adjustment), is adjusted only via recorded `bill_adjustment` rows, while past months, closed tenancies and written-off bills are never adjusted by a rate change. If a lowered amount falls below what is paid on a bill, the difference becomes advance (`05-billing-engine.md` Section 5.3).
 
 #### standard_amount_change
 
@@ -1191,7 +1165,7 @@ These may be updated normally:
 - organization, property, room
 - tenancy, tenant, sender_alias
 - monthly_bill (amount changes only via adjustment)
-- billing_config, billing_override, portal_setting
+- billing_config, portal_setting
 - import_profile, import_channel_category_mapping, import_batch
 - utility_provider
 - tenant_access_credential (rotation)

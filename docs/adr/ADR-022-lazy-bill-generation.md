@@ -12,7 +12,7 @@ Bills are generated lazily and synchronously by one function,
 `ensure_bills_through(organization_id, month)`, with no background scheduler.
 
 - It creates any missing bill for each active or closed tenancy within its billing range (`05-billing-engine.md` Section 5.1) for each month up to and including
-  `month`, consulting `billing_override` (ADR-024). Creation is
+  `month`. Creation is
   `INSERT ... ON CONFLICT (tenancy_id, billing_month) DO NOTHING`, so it is idempotent
   and safe under concurrency.
 - Callers: admin dashboard load, payment allocation, import batch confirm, admin report

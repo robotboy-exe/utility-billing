@@ -1,9 +1,9 @@
 # Utility Billing MVP Architecture
 
 Document: `docs/03-mvp-architecture.md`
-Version: `0.12.0`
+Version: `0.13.0`
 Status: Consolidated source of truth
-Last Updated: 2026-10-21
+Last Updated: 2026-11-21
 Related documents: `04-database.md`, `05-billing-engine.md`, `06-transaction-ingestion.md`, `09-security.md`, `10-deployment.md`, `13-doc-conventions.md`, `changelog-03.md`
 
 ---
@@ -300,7 +300,7 @@ The MVP must therefore be designed as follows:
 
 Lazy generation (ADR-022) is one function with one contract. Detailed bill rules are in `05-billing-engine.md`.
 
-- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active or closed tenancy within its billing range — from its move-in month through its move-out month, both included, or through `month` when it has no move-out date — for each month up to and including `month`. `month` is computed in the business timezone (§10.4). It consults `billing_override` (bill/skip decisions, ADR-024) before creating a bill. A draft tenancy is never billed.
+- **Single entry point.** `ensure_bills_through(organization_id, month)` creates any missing bill for every active or closed tenancy within its billing range — from its move-in month through its move-out month, both included, or through `month` when it has no move-out date — for each month up to and including `month`. `month` is computed in the business timezone (§10.4). A draft tenancy is never billed.
 - **Idempotent by construction.** Creation is `INSERT ... ON CONFLICT (tenancy_id, billing_month) DO NOTHING`, backed by the unique constraint in `04-database.md`. Calling it twice, or concurrently, yields the same bills.
 - **Callers.** Admin dashboard load, payment allocation, import batch confirm, and admin report requests. Nothing else calls it (ADR-022).
 - **Not callers.** Tenant-session requests, including the tenant portal, are not callers (read-only, ADR-009). The portal reads existing bills and shows an "as of" date, so its figures can lag a month rollover until the next admin action.
@@ -676,7 +676,7 @@ Organization ─── Property ─── Room ─── Tenancy ─── Tenan
 
 *Detailed schema, constraints, indexes, and exact field definitions are specified in `04-database.md`.*
 
-This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `admin_session`, `tenant_login_attempt`, `admin_login_attempt`, `billing_config`, `billing_override`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
+This table is an intentional conceptual subset of the domain. It shows the entities that carry business meaning, not every physical table. The following physical/operational tables are intentionally excluded here and are specified in `04-database.md`: `admin_user`, `tenant_access_credential`, `tenant_session`, `admin_session`, `tenant_login_attempt`, `admin_login_attempt`, `billing_config`, `standard_amount_change`, `import_channel_category_mapping`, `staged_import_row`, and `portal_setting`.
 
 ---
 
@@ -747,9 +747,8 @@ Two-ledger rules: §3 (ADR-017).
 **10.3 Billing & Allocation (Summary)**
 - **Generation:** Lazy and rolling through `ensure_bills_through` (§5.2.1, ADR-022).
 - **Standard amount:** Organization-wide and uniform (ADR-023). No per-room amount overrides.
-- **Adjustments:** Only an org-wide rate change (the new amount applied to every current-month bill of an active tenancy, paid or not; never to past months or closed tenancies; if a bill is lowered below what is paid, the difference becomes advance) or a debt write-off (ADR-010, ADR-025). Audited.
-- **Bill/skip decisions:** `billing_override` is a per-tenancy, per-month decision to force-bill or force-skip (ADR-024). It never changes an amount.
-- **Partial months:** Move-in and move-out partial months are billed in full by default; the admin can opt a month out with a skip decision recorded before the bill is generated, or write off a closed tenancy's move-out debt after closure (ADR-024).
+- **Adjustments:** Only an org-wide rate change (the new amount applied to every current-month bill of an active tenancy, paid or not, except a bill that has a write-off adjustment; never to past months or closed tenancies; if a bill is lowered below what is paid, the difference becomes advance) or a debt write-off (ADR-010, ADR-025). Audited.
+- **Partial months:** Move-in and move-out partial months are billed in full by default; the admin can write off the whole outstanding balance of the move-in month bill, or write off a closed tenancy's outstanding balance, including its move-out month, after closure (ADR-024).
 - **Allocation:** Oldest-outstanding-first (ADR-020); overpayment becomes advance credit; advance balance is derived and every movement is logged and reconciled (ADR-021).
 - *Algorithms, edge cases and corrections are in `05-billing-engine.md`.*
 
@@ -954,7 +953,7 @@ The full Context, Decision, and Consequences for each ADR are stored in individu
 | 021 | Advance Movement Ledger and Reconciliation | Accepted | Append-only log for advance credit auditability. |
 | 022 | Automatic Rolling Bill Generation (Lazy) (revised) | Accepted (revised) | One idempotent function, fixed callers, locking rules. |
 | 023 | No Per-Room Overrides; Rate-Change-Driven Adjustments (revised) | Accepted (revised) | Only the org-wide standard amount is adjustable. |
-| 024 | Partial-Month Billing Asymmetry (revised) | Accepted (revised) | Move-in billed by default (skip opt-out); move-out billed. |
+| 024 | Partial-Month Billing Asymmetry (revised) | Accepted (revised) | Both partial months billed in full; move-in bill or closed-tenancy balance written off by the admin. |
 | 025 | Debt Write-Offs, No Hard Deletes | Accepted | Audited zeroing of debt; no hard deletes. |
 | 026 | Closed Tenancies Lose Portal Access | Accepted | Portal credentials permanently deactivated. |
 | 027 | Property Dashboard Metrics (revised) | Accepted (revised) | Outstanding debt, room ratios, BEDC outflow. |
