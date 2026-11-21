@@ -100,7 +100,7 @@ This document resolves the Technical Context unknowns for implementing `docs/05-
 
 ### R-14 — M1 backfill set is date-derived, not status-derived
 
-- **Decision**: the months a tenancy must be billed for are derived from `[start_date month, end_date month]` inclusive; every month in that range is billed in full by default, and a `skip` override recorded before generation suppresses a month (`docs/05` §5.4). The tenancy's current `status` only decides the running month's eligibility; a `draft` tenancy is never billed (`docs/05` §5.1).
+- **Decision**: the months a tenancy must be billed for are derived from `[start_date month, end_date month]` inclusive; every month in that range is billed in full by default, with no override input and no skip decision (`docs/05` §5.4). The tenancy's current `status` only decides the running month's eligibility; a `draft` tenancy is never billed (`docs/05` §5.1).
 - **Rationale**: Samuel's ruling M1 requires bills through the move-out month even when the tenancy closed and nobody opened the app for months; a status-only rule would miss them.
 - **Alternatives considered**: billing only `active` tenancies (rejected by `docs/05` §5.1, which now bills active or closed tenancies through the move-out month).
 

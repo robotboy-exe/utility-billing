@@ -29,7 +29,7 @@ Tests are one file per user story: `tests/test_bill_generation.py` (US1), `test_
 ### 1. Lazy rolling generation (US1; SC-003, SC-004)
 - An active tenancy with no bills → generation creates one bill for the month; vacant rooms get none; a second call creates no duplicate (`docs/05` §5.1).
 - A tenancy moving in in March with `end_date` 20 June, untouched until a September generation → March–June bills (June in full), no July/August/September bill (Samuel's ruling M1).
-- Move-in month billed in full by default, suppressed only by a `skip` override recorded before generation; move-out partial month billed in full (`docs/05` §5.4). A `draft` tenancy is never billed (`docs/05` §5.1).
+- Move-in month billed in full by default; its whole outstanding balance can be written off by the admin. Move-out partial month billed in full (`docs/05` §5.3, §5.4). A `draft` tenancy is never billed (`docs/05` §5.1).
 - An admin dashboard load generates missing bills before the dashboard view runs (`docs/05` §5.1, §14.4).
 - A standard-amount change at 00:00 on the 1st → the previous month keeps the old amount, the new month takes the new amount (`docs/05` §5.2).
 - Month boundaries around 23:59/00:00 in `Africa/Lagos` and a second timezone (`docs/03` §10.4).
@@ -45,7 +45,9 @@ Tests are one file per user story: `tests/test_bill_generation.py` (US1), `test_
 - Rate rise: a fully-paid ₦4,000 bill becomes billed ₦5,000, paid ₦4,000 (`docs/05` §5.3).
 - Rate drop: the excess is reversed from the payments in the reverse §6.2 order into advance, then applied oldest-first; past months and closed tenancies untouched (`docs/05` §5.3, §11.2).
 - Write-off of a closed tenancy: one action records one `write_off` adjustment for every bill with a balance; standard ₦4,000, paid ₦1,000, written off ₦3,000 → final ₦1,000; history shows original, written-off and final amounts (Samuel's rulings M3, S5; `docs/05` §8.4, §11.1).
-- Write-off on an active tenancy is refused (`docs/05` §5.3).
+- The whole-tenancy write-off on an active tenancy is refused (`docs/05` §5.3).
+- Move-in month bill write-off, active tenancy: standard ₦4,000, move-in month unpaid → one `write_off` adjustment, final 0, the bill reads Written off. Part-paid move-in bill: ₦1,000 paid, write-off of the rest → final ₦1,000, the bill reads Paid and is flagged (Samuel's ruling S8; `docs/05` §5.3, §8.4). Refused with nothing written when the bill does not exist or has nothing outstanding.
+- Rate change: a bill with a write-off adjustment is final and is never adjusted; the whole-tenancy write-off after a move-in write-off skips the now-zero bill (`docs/05` §5.3).
 
 ### 4. Corrections and reversals (US4; SC-007, SC-010)
 - Complete reversal: allocations undone, advance cleared, payment unmatched, every affected bill owes again (`docs/05` §12.1).

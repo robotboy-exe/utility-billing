@@ -13,7 +13,6 @@ Each domain type is a pure value object built by the persistence adapter (`repos
 | `OrganizationContext` (`organization_id`, `timezone`) | `organization` | §6.2 | US1–US6 |
 | `Tenancy` (`id`, `organization_id`, `room_id`, `status`, `start_date`, `end_date`) | `tenancy` | §6.3 | US1, US5 |
 | `BillingConfig` (`standard_amount_minor`, `currency`) | `billing_config` | §6.4 | US1, US3 |
-| `BillingOverride` (`tenancy_id`, `billing_month`, `decision`) | `billing_override` | §6.4 | US1 |
 | `StandardAmountChange` (`previous_amount_minor`, `new_amount_minor`, `effective_at`) | `standard_amount_change` | §6.4 | US1 |
 | `MonthlyBill` (`id`, `organization_id`, `tenancy_id`, `billing_month`, `standard_amount_minor`, `final_amount_minor`, `currency`, `is_adjusted`) | `monthly_bill` | §6.5 | US1, US2, US3, US4, US5 |
 | `Payment` (`id`, `organization_id`, `source`, `transaction_date`, `transaction_time`, `amount_minor`, `currency`, `direction`, `record_category`) | `transaction` | §6.5 | US2, US4, US6 |
@@ -46,7 +45,7 @@ Each rule is enforced by the cited section.
 - **Aggregation rules**: bill status and tenancy state per `docs/05` §8.1–8.4 and §9; signed net allocation per `docs/04` §7.1; remaining per `docs/04` §7.2; outstanding and the two-amount split per `docs/04` §7.3; advance per `docs/04` §7.4; net position per `docs/04` §7.6.
 - **Organization scoping**: every read/write filters `organization_id` (`docs/04` §8.9; spec FR-057).
 - **Month boundaries**: computed in `organization.timezone` (`docs/04` §6.2; ADR-028).
-- **Generation contract**: lazy, idempotent, caller-restricted; active or closed tenancies are billed through the move-out month; move-in and move-out months are billed in full by default, suppressed only by a `skip` override recorded before generation; a `draft` tenancy is never billed (`docs/05` §5.1, §5.4, §6.9; `docs/03` §5.2.1; ADR-022).
+- **Generation contract**: lazy, idempotent, caller-restricted; active or closed tenancies are billed through the move-out month; move-in and move-out months are billed in full by default with no override input; the admin can write off the whole outstanding balance of a tenancy's move-in month bill, and a closed tenancy's whole outstanding balance; a `draft` tenancy is never billed (`docs/05` §5.1, §5.4, §6.9; `docs/03` §5.2.1; ADR-022).
 - **Allocation gating**: only matched tenant payments; allocations attach to the active-match tenancy (`docs/05` §13; `docs/04` §8.12).
 - **Advance ledger**: movements written atomically with allocations; `reversed` only offsets `created`; restoring an applied allocation is a new `created` (`docs/05` §7.4; `docs/04` §7.5, §8.8).
 - **One match per transaction**: append-only match history; a match reversed at most once (`docs/04` §8.11).
@@ -64,7 +63,8 @@ Each rule is enforced by the cited section.
 | Organization scoping (`docs/04` §8.9) | Adapter and views filter `organization_id`; tested US6 |
 | One active match per transaction (`docs/04` §8.11) | Match append/correction rules; tested US4/US6 |
 | Allocations follow the match (`docs/04` §8.12) | Unmatch only when net allocations are 0; correction reverses then re-matches; tested US4 |
-| M1 bill range (`docs/05` §5.1, §5.4) | Generation set derived from `[start_date, end_date]`; billed in full by default with skip override; tested US1 |
+| M1 bill range (`docs/05` §5.1, §5.4) | Generation set derived from `[start_date, end_date]`; every month billed in full by default with no override input; tested US1 |
 | R1 reversal-to-advance (Samuel's ruling R1) | Single primitive in `engine.py`; tested US2/US3/US4 |
 | R2 atomic match correction (Samuel's ruling R2) | One transaction under the §6.9 lock order; tested US4 |
-| M3 write-off arithmetic (Samuel's ruling M3) | `previous_amount_minor` = before, `new_amount_minor` = net allocated; one adjustment per bill with a balance in the whole-tenancy action; tested US3 |
+| M3 write-off arithmetic (Samuel's ruling M3) | `previous_amount_minor` = before, `new_amount_minor` = net allocated; one adjustment per bill with a balance in the whole-tenancy action, and one adjustment on the move-in month bill in the move-in action; tested US3 |
+| Rate-change finality (Samuel's ruling S8) | A bill with a write-off adjustment is excluded from the rate-change set; tested US3 |

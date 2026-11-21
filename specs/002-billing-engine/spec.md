@@ -14,7 +14,15 @@ This feature delivers the tenant billing engine: the deterministic module that t
 
 `docs/05-billing-engine.md` is the source of intent and `docs/04-database.md` is the table contract. This specification states *what the engine must do* and cites `docs/05` (and `docs/04` where a table or derived rule is involved) by section rather than restating algorithms or columns. Where a point is settled by one of the runbook rulings it is cited as **Samuel's ruling `<id>`** and the ruling overrides any disagreeing prose.
 
-The engine builds on the existing persisted schema (`transaction` is fully immutable and carries no tenancy or matching columns; matches live in the append-only `transaction_match` table; `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `billing_config`, `billing_override`, `tenancy`, and `organization` already exist). This feature adds no schema change; it reads and writes those tables through the billing engine and the reporting queries.
+The engine builds on the existing persisted schema (`transaction` is fully immutable and carries no tenancy or matching columns; matches live in the append-only `transaction_match` table; `monthly_bill`, `payment_allocation`, `advance_movement`, `bill_adjustment`, `standard_amount_change`, `billing_config`, and `organization` already exist). This feature adds no schema change; it reads and writes those tables through the billing engine and the reporting queries, and the engine reads and writes no `billing_override` table (there is no per-tenancy, per-month billing override).
+
+## Principles
+
+The engine follows the three billing ground rules of `docs/05` §3.6, which constrain every requirement below:
+
+1. Bills, payments and advance credit each belong to one tenancy and are reconciled against that tenancy only. A payment of one tenancy never affects a bill of another.
+2. Advance credit exists to pay the bills of the tenancy that owns it, whether that tenancy is active or closed.
+3. Every bill that has an amount due is to be paid and reconciled unless the admin explicitly writes it off.
 
 ## Clarifications
 
@@ -34,15 +42,15 @@ Whenever an admin action that needs current bills runs (dashboard load, payment 
 
 **Why this priority**: Every other behaviour needs bills to exist, and lazy generation is the project's replacement for a scheduled job on free hosting (ADR-022). It is the first dependency of the engine.
 
-**Independent Test**: With a controllable clock and one provisioned organization, call the generation function and assert the exact set of bills it creates for a fresh organization, for repeated calls (idempotence), for a closed tenancy with a move-out date months earlier, for a move-in month with and without a skip override, and for a rate change saved at a month boundary.
+**Independent Test**: With a controllable clock and one provisioned organization, call the generation function and assert the exact set of bills it creates for a fresh organization, for repeated calls (idempotence), for a closed tenancy with a move-out date months earlier, for a move-in month (billed in full, its whole outstanding balance then write-offable by the admin), and for a rate change saved at a month boundary.
 
 **Acceptance Scenarios**:
 
 1. **Given** an active tenancy and no bills, **When** generation runs for a month, **Then** exactly one bill exists for that tenancy-month and vacant rooms have none (`docs/05` §5.1).
 2. **Given** generation has already run for a month, **When** it runs again for the same month, **Then** no additional bill is created (`docs/05` §5.1; ADR-022).
-3. **Given** a tenancy that moved in in March and has an `end_date` of 20 June, and no admin action between then and September, **When** generation runs in September, **Then** bills exist for March, April, May and June only — June billed in full — and no July, August or September bill exists (Samuel's ruling M1; `docs/05` §5.4).
-4. **Given** a tenancy whose move-in month is a partial month, **When** generation runs for that month, **Then** the bill is created at the full standard amount by default (`docs/05` §5.4, §15); **When** a per-tenancy/per-month `skip` override was recorded before generation, **Then** no bill is created for that tenancy-month (`docs/04` §6.4 `billing_override`).
-5. **Given** a tenancy whose move-out month is a partial month, **When** generation runs for that month, **Then** the bill is created in full, and the admin can later exempt it with foreknowledge (skip override) or write it off after closure (`docs/05` §5.4; `docs/04` §6.4).
+3. **Given** a tenancy that moved in in March and has an `end_date` of 20 June, and no admin action between then and September, **When** generation runs in September, **Then** bills exist for March, April, May and June only — June billed in full — and no July, August or September bill exists (Samuel's ruling M1; `docs/05` §5.1).
+4. **Given** a tenancy whose move-in month is a partial month, **When** generation runs for that month, **Then** the bill is created at the full standard amount by default (`docs/05` §5.3, §5.4, §15); **When** the admin writes off the bill's whole outstanding balance, **Then** it is one `write_off` adjustment on that bill and the balance is zero (`docs/05` §5.3, §5.4).
+5. **Given** a tenancy whose move-out month is a partial month, **When** generation runs for that month, **Then** the bill is created in full, and the admin can write it off after closure with the whole-tenancy write-off (`docs/05` §5.3, §5.4).
 6. **Given** a standard-amount change saved exactly at 00:00 on the 1st of a month, **When** a bill is generated late for the previous month and for the new month, **Then** the previous month takes the amount in force at the end of that previous month and the new month takes the new amount (`docs/05` §5.2; `docs/04` §6.4 `standard_amount_change`).
 7. **Given** a tenancy in `draft` status, **When** generation runs, **Then** no bill is created for it (`docs/05` §5.1).
 8. **Given** an organization with a different IANA business timezone, **When** generation runs around a month boundary at 23:59 and 00:00, **Then** the month passed to generation is the business-timezone month (`docs/03` §10.4; ADR-028).
@@ -76,11 +84,11 @@ For each tenancy, the engine processes its matched tenant payments oldest-first 
 
 ### User Story 3 - Bill adjustments: rate change and write-off (Priority: P3)
 
-When the admin changes the org-wide standard amount mid-month, every current-month bill of an active tenancy is set to the new amount by a recorded adjustment, paid or not, while past months and closed tenancies are untouched. A rise makes a paid bill part paid (advance may cover the difference); a drop returns the excess to the payments as advance and re-applies it. A write-off zeroes a closed tenancy's outstanding balance through one audited adjustment per bill with a balance.
+When the admin changes the org-wide standard amount mid-month, every current-month bill of an active tenancy is set to the new amount by a recorded adjustment, paid or not, while past months and closed tenancies are untouched. A rise makes a paid bill part paid (advance may cover the difference); a drop returns the excess to the payments as advance and re-applies it. A write-off zeroes a closed tenancy's outstanding balance through one audited adjustment per bill with a balance, and the admin can also write off the whole outstanding balance of a tenancy's move-in month bill, on an active or a closed tenancy, through one audited adjustment on that bill.
 
 **Why this priority**: Adjustments are the only permitted way a bill amount changes, and they depend on allocation and the advance ledger (a drop needs the R1 reversal-to-advance primitive).
 
-**Independent Test**: With current-month bills in unpaid, part-paid and fully-paid states, apply a rate rise and a rate drop and assert the adjustments, allocations, advance movements and derived amounts, then write off a closed tenancy's balance and assert the result.
+**Independent Test**: With current-month bills in unpaid, part-paid and fully-paid states, apply a rate rise and a rate drop and assert the adjustments, allocations, advance movements and derived amounts, then write off a closed tenancy's balance and, separately, a tenancy's move-in month bill, and assert the results.
 
 **Acceptance Scenarios**:
 
@@ -90,10 +98,15 @@ When the admin changes the org-wide standard amount mid-month, every current-mon
 4. **Given** past-month bills, **When** a rate change is saved, **Then** past months are never adjusted (`docs/05` §5.3).
 5. **Given** a reduced bill whose new amount is below what is allocated, **When** the adjustment is recorded, **Then** the excess is freed by a reversal allocation plus one `created` movement (`docs/05` §11.2).
 6. **Given** a closed tenancy with an outstanding balance, **When** the admin writes it off, **Then** one write-off action records one `write_off` adjustment for every bill with a balance, zeroing the whole outstanding balance, carrying the auto-generated public note with an optional custom note and the admin identity, creating one audit entry per adjustment and setting the adjusted flag on each affected bill, and no record is deleted (`docs/05` §5.3, §11.1, §17 rule 19; `docs/04` §6.5).
-7. **Given** an active tenancy, **When** a write-off is attempted, **Then** it is refused (`docs/05` §5.3).
-8. **Given** a bill with a write-off adjustment, **When** a rate change is saved, **Then** the write-off is never touched (`docs/05` §5.3).
+7. **Given** an active tenancy, **When** the whole-tenancy write-off is attempted, **Then** it is refused; only the move-in month bill write-off is available on an active tenancy (`docs/05` §5.3).
+8. **Given** a bill with a write-off adjustment, **When** a rate change is saved, **Then** the bill is final and the rate change never touches it, including an active tenancy's part-written-off move-in bill (`docs/05` §5.3, §9).
 9. **Given** an admin saving any adjustment, **Then** the stored record holds adjustment type, previous amount, new amount, timestamp, an auto-generated public note with optional custom note, and the admin identity (`docs/05` §11.1; `docs/04` §6.5).
 10. **Given** any attempt to change a bill amount other than by rate change or write-off, **Then** it is rejected; there are no arbitrary per-room amount overrides (`docs/05` §5.3, §17 rule 15; `docs/04` §8.7).
+11. **Given** a tenancy's move-in month bill with an outstanding balance, open or closed tenancy, **When** the admin writes it off, **Then** one `write_off` adjustment on that bill zeroes its whole outstanding balance (`docs/05` §5.3, §5.4).
+12. **Given** a move-in month bill written off, **Then** `previous_amount_minor` is the final amount before and `new_amount_minor` is the net allocated amount, the adjusted flag is set and one audit entry is written; a bill with no balance was already Paid or No charge (`docs/05` §5.3, §8.4, §11.1).
+13. **Given** the move-in write-off, **Then** only that one bill is adjusted, no amount is chosen, and no other bill of the tenancy can be written off this way; the whole-tenancy write-off remains closed-only (`docs/05` §5.3).
+14. **Given** a move-in month bill that does not exist, or has nothing outstanding, **When** the move-in write-off is requested, **Then** it is refused with a clear message and nothing is written (Samuel's ruling S8; `docs/05` §5.3).
+15. **Given** a move-in month bill already written off to nothing, **When** the whole-tenancy write-off runs after closure, **Then** it skips that bill because it has no balance (`docs/05` §5.3).
 
 ---
 
@@ -169,9 +182,9 @@ Unmatched tenant payments can be matched manually, which appends a match row; af
 - Roommate changes within a tenancy (add, remove, replace) change no bill, payment, allocation or advance (`docs/05` §5.5, §15 item 12; §17 rule 23).
 - Multiple payments with identical timestamps (`docs/05` §15 item 13; §6.2).
 - Payments matched manually after the initial import (`docs/05` §15 item 14).
-- Move-in partial month billed in full by default, suppressed only by a `skip` override recorded before generation; move-out partial month billed in full, then written off after closure (`docs/05` §15 items 15–16; §5.4).
+- Move-in partial month billed in full by default, its whole outstanding balance write-offable by the admin; move-out partial month billed in full, then written off after closure (`docs/05` §15 items 15–16; §5.3, §5.4).
 - Standard amount raised or lowered mid-month with some current-month bills fully paid, some part paid and some unpaid (`docs/05` §15 item 17).
-- Billing override forcing a bill or a skip for a specific tenancy-month (`docs/05` §15 item 19; `docs/04` §6.4).
+- Write-off of a tenancy's move-in month bill (`docs/05` §15 item 19; §5.3).
 - Advance reconciliation mismatch between the derived balance and the logged ledger is flagged as an integrity error (`docs/05` §7.4; `docs/04` §7.5).
 
 ## Requirements *(mandatory)*
@@ -183,12 +196,12 @@ Bills are generated and timed (US1).
 - **FR-001**: The engine MUST expose one generation entry point `ensure_bills_through(organization_id, month)` that creates any missing monthly bill for each active or closed tenancy within its billing range for each month up to and including `month`, with no background scheduler (`docs/05` §5.1; `docs/03` §5.2.1; ADR-022).
 - **FR-002**: Only the admin dashboard load, payment allocation, import batch confirm, and admin report requests MAY call generation; tenant-session requests, including the tenant portal, MUST NOT (`docs/05` §5.1; `docs/03` §5.2.1; ADR-022).
 - **FR-003**: `month` and every calendar-month boundary MUST be computed in the organization's IANA business timezone, default `Africa/Lagos`, with instants stored in UTC (`docs/03` §10.4; ADR-028; `docs/04` §6.2).
-- **FR-004**: A tenancy MUST be billed for every month from move-in through the month of its `end_date` inclusive, even when generation runs months later; no bill may be created for a month after the `end_date` month (Samuel's ruling M1; `docs/05` §5.4).
-- **FR-005**: A move-in month MUST be billed in full by default; a per-tenancy/per-month `skip` override, recorded before the bill is generated, MUST suppress it. A move-out partial month MUST be billed in full by default and MAY be exempted by a skip override or written off after closure (`docs/05` §5.4, §15; `docs/04` §6.4 `billing_override`; ADR-024).
+- **FR-004**: A tenancy MUST be billed for every month from move-in through the month of its `end_date` inclusive, even when generation runs months later; no bill may be created for a month after the `end_date` month (Samuel's ruling M1; `docs/05` §5.1).
+- **FR-005**: A move-in month MUST be billed in full by default, with no skip decision and no opt-out at generation; the admin MAY write off its whole outstanding balance (FR-060). A move-out partial month MUST be billed in full by default and MAY be written off after closure with the whole-tenancy write-off (`docs/05` §5.3, §5.4, §15; §17 rule 18; Samuel's ruling S8).
 - **FR-006**: A bill generated late for an already-ended month MUST take the standard amount in force at the end of that month, taken from `standard_amount_change`; the running month's bill MUST take the amount currently in force; a change saved exactly at 00:00 on the 1st belongs to the new month (`docs/05` §5.2; `docs/04` §6.4).
 - **FR-007**: Generation MUST be idempotent and safe to run repeatedly and concurrently, creating no duplicate bill (`docs/05` §5.1, §10; `docs/03` §5.2.1; `docs/04` §8.6).
 - **FR-008**: Vacant rooms MUST NOT receive bills, and a `draft` tenancy MUST NOT receive bills (`docs/05` §5.1).
-- **FR-009**: Generation MUST apply any `billing_override` force-bill or force-skip decision and MUST NOT change any bill amount through an override (`docs/05` §5.2, §5.4, §10; `docs/04` §6.4).
+- **FR-009**: There MUST be no per-tenancy, per-month billing override; generation MUST NOT take any override input and MUST NOT change any bill amount except through a recorded adjustment (`docs/05` §5.2, §5.4, §10).
 - **FR-010**: Admin report requests MUST generate any missing bills as part of serving the report (`docs/05` §5.1, §14.4).
 
 Payments are allocated and advance is tracked (US2).
@@ -212,14 +225,15 @@ Payments are allocated and advance is tracked (US2).
 
 Bill adjustments are applied (US3).
 
-- **FR-027**: A mid-month rate change MUST set every current-month bill of an active tenancy to the new amount by a recorded `rate_change` adjustment, whether the bill is unpaid, part paid or fully paid; it MUST never adjust past months or closed tenancies (`docs/05` §5.3; §17 rule 16; ADR-010, ADR-023).
+- **FR-027**: A mid-month rate change MUST set every current-month bill of an active tenancy to the new amount by a recorded `rate_change` adjustment, whether the bill is unpaid, part paid or fully paid; it MUST never adjust past months or closed tenancies, and a bill that has a write-off adjustment is final and MUST be excluded from the rate change (`docs/05` §5.3, §9; §17 rule 16; ADR-010, ADR-023).
 - **FR-028**: A rate change MUST take effect at the moment the admin saves it, and the current month is the business-timezone month of that moment (`docs/05` §5.3). The new standard amount applies to every following month (`docs/05` §5.3; §17 rule 16).
 - **FR-029**: On a rate rise, a fully-paid bill MUST become part paid and the difference remain owed; if the tenancy holds advance, normal advance application MUST pay the difference (`docs/05` §5.3).
 - **FR-030**: On a rate drop, if the new amount is below what is already paid on a bill, the excess MUST be removed by a reversal allocation and become advance linked to the payment it came from, with one `created` advance movement per reversal allocation; where the bill was paid by more than one payment the difference MUST be taken in the exact reverse of the §6.2 order (latest date/time, then larger amount, then higher id); the advance MUST then be applied to the tenancy's oldest outstanding bill, otherwise it waits for the next bill (`docs/05` §5.3, §11.2; Samuel's ruling R1).
 - **FR-031**: If a reduced bill's new amount is lower than what is allocated, the excess MUST be freed by a reversal allocation plus one `created` movement (`docs/05` §11.2).
-- **FR-032**: One write-off action MUST zero a closed tenancy's whole outstanding balance for every bill that still has a balance, through one recorded `write_off` adjustment per such bill; writing off a chosen amount or a chosen selection of bills is not supported in the MVP. A write-off MUST be possible only for a closed tenancy, MUST carry the auto-generated public note with an optional custom note and the admin identity, MUST create one audit entry per adjustment, and MUST set each affected bill's adjusted flag; a write-off on an active tenancy MUST be refused; a rate change MUST never touch a write-off (`docs/05` §5.3, §11.1; `docs/04` §6.5; ADR-025).
+- **FR-032**: One write-off action MUST zero a closed tenancy's whole outstanding balance for every bill that still has a balance, through one recorded `write_off` adjustment per such bill; writing off a chosen amount or a chosen selection of bills is not supported in the MVP. The whole-tenancy write-off MUST be possible only for a closed tenancy, MUST carry the auto-generated public note with an optional custom note and the admin identity, MUST create one audit entry per adjustment, and MUST set each affected bill's adjusted flag; a whole-tenancy write-off on an active tenancy MUST be refused. A bill that has a write-off adjustment is final and a rate change MUST never touch it (`docs/05` §5.3, §5.4, §11.1; §17 rules 18, 19, 20; `docs/04` §6.5; ADR-025).
 - **FR-033**: Every adjustment MUST store adjustment type, previous amount, new amount, timestamp, an auto-generated public note with an optional custom note, and the admin identity; a bill's final amount MUST change only through a recorded adjustment and any such change MUST be audited (`docs/05` §11.1; §17 rules 10, 17; `docs/04` §6.5, §8.7; constitution Database & Schema).
 - **FR-034**: There MUST be no arbitrary per-room bill amount override; the only adjustable parameter is the org-wide standard monthly amount (`docs/05` §5.3; §17 rule 15; ADR-023).
+- **FR-060**: The admin MAY write off the whole outstanding balance of a tenancy's move-in month bill, on an active or a closed tenancy, through one recorded `write_off` adjustment on that bill; no chosen amount is accepted, no other bill of the tenancy can be written off this way, and the whole-tenancy write-off stays closed-only. The adjustment MUST carry the auto-generated public note with an optional custom note and the admin identity, MUST record `previous_amount_minor` as the final amount before and `new_amount_minor` as the net allocated amount, MUST create one audit entry, and MUST set the bill's adjusted flag; the derived status then follows §8.4. The action MUST be refused, writing nothing, when the move-in month bill does not exist or has nothing outstanding. A bill that has a write-off adjustment is final and MUST never be adjusted by a rate change (`docs/05` §5.3, §5.4, §8.4, §11.1; §15 item 19; Samuel's ruling S8).
 
 Corrections and reversals are performed (US4).
 
@@ -264,7 +278,7 @@ Manual matching and scoping (US6).
 - **payment_allocation**: append-only link from a payment to a bill, signed by allocation type for derivation (`docs/04` §6.5).
 - **advance_movement**: append-only advance-credit ledger (`created | applied | reversed`) reconciled against the derived balance (`docs/04` §6.5; ADR-021).
 - **bill_adjustment**: append-only `rate_change` or `write_off` records with note and admin identity (`docs/04` §6.5).
-- **billing_config / standard_amount_change / billing_override**: the org-wide standard amount, its append-only change history, and per-tenancy/per-month bill-or-skip decisions (`docs/04` §6.4).
+- **billing_config / standard_amount_change**: the org-wide standard amount and its append-only change history (`docs/04` §6.4).
 
 ## Success Criteria *(mandatory)*
 
@@ -272,7 +286,7 @@ Manual matching and scoping (US6).
 
 - **SC-001**: ₦4,000 outstanding with ₦1,000 paid yields ₦3,000 outstanding; ₦4,000 outstanding with ₦5,000 paid yields a paid bill and ₦1,000 advance (`docs/05` §6.5, §6.6, §16).
 - **SC-002**: Two bills and one payment covering both fill the oldest bill first; a payment received after month end allocates to the oldest outstanding bill; a payment received before a bill exists is held as advance until generation, then fills the bill (`docs/05` §6.7, §6.8, §7.3, §16).
-- **SC-003**: A move-in month is billed in full by default and suppressed only by a `skip` override recorded before generation; a move-out partial month is billed in full and a write-off zeroes the balance after closure (`docs/05` §5.4, §16).
+- **SC-003**: A move-in month is billed in full by default and the admin can write off its whole outstanding balance; a move-out partial month is billed in full and the whole-tenancy write-off zeroes the balance after closure (`docs/05` §5.3, §5.4, §16).
 - **SC-004**: A tenancy that moved in in March with an `end_date` of 20 June, untouched until a September generation, produces March–June bills (June in full) and no July/August/September bill (Samuel's ruling M1).
 - **SC-005**: A standard amount raised mid-month adjusts every current-month bill of an active tenancy, including fully-paid ones (they become part paid), and leaves past months untouched; lowered mid-month, the difference on bills paid above the new amount becomes advance; closed tenancies are untouched (`docs/05` §5.3, §16; §17 rule 16).
 - **SC-006**: A debt write-off zeroes the balance via an audited adjustment with all records preserved; for standard ₦4,000, paid ₦1,000, written off ₦3,000, the final amount is ₦1,000, and bill history/detail shows the original amount, the written-off amount and the final amount (Samuel's ruling M3; `docs/05` §5.3, §8.4, §16).
@@ -285,12 +299,12 @@ Manual matching and scoping (US6).
 
 ## Assumptions
 
-- The persisted schema (`docs/04`) already exists as 29 tables; this feature adds no schema change and builds on the existing models under `backend/src/` (`transaction` immutable; matches in `transaction_match`). If the engine appears to need a schema change, that is escalated rather than made.
+- The persisted schema (`docs/04`) already exists; this feature adds no schema change and builds on the existing models under `backend/src/` and uses no `billing_override` table (removed from `docs/04`; dropping it from the existing 001 code is a separate later change, Samuel's decision 2026-11-21) (`transaction` immutable; matches in `transaction_match`). If the engine appears to need a schema change, that is escalated rather than made.
 - `docs/05-billing-engine.md` is the source of intent and `docs/04-database.md` is the table/derived-rule contract; `docs/03` §5.2.1, §9.2, §10.4 and §11.1–11.2 constrain callers, visibility, timezone and reporting.
 - Money is integer minor units with explicit currency; all financial records are append-only; the transaction table stays fully immutable (constitution; `docs/04` §3.4–3.5, §11.1).
 - PostgreSQL is production and SQLite is local/tests; tests default to a fresh in-memory SQLite database and never the development database file (`docs/03` §6.6; AGENTS.md).
 - The business timezone is one per organization, default `Africa/Lagos` (ADR-028).
-- Samuel's rulings R1, R2, M1, S3, S4, S6 and S7 override any disagreeing prose; `docs/05` §5.1 now states the same billing range as M1, so no conflict remains.
+- Samuel's rulings R1, R2, M1, S3, S4, S5, S6, S7 and S8 take precedence over any disagreeing prose; `docs/05` §5.1 now states the same billing range as M1, so no conflict remains.
 
 ## Out of Scope (parked — do not specify or decide here)
 

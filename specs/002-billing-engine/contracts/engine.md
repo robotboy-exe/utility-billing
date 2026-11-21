@@ -16,14 +16,15 @@ This is the callable contract the billing engine upholds: the pure-domain entry 
 |---|---|---|
 | `business_month(instant, tz)` | instant, IANA tz → `date` (first day) | `docs/03` §10.4; ADR-028 |
 | `month_starts_between(start, end)` | two dates → ordered month starts | M1 range; `docs/05` §5.4 |
-| `expected_bill_months(tenancy, target_month, overrides)` | tenancy, target → set of months to bill | Every month in range is billed in full by default; a skip override recorded before generation suppresses a month (bill never changes the amount); US1; M1; docs/05 §5.1, §5.4 |
+| `expected_bill_months(tenancy, target_month)` | tenancy, target → set of months to bill | Every month in range is billed in full by default; no override input and no skip decision (US1; M1; `docs/05` §5.1, §5.4) |
 | `resolve_standard_amount(config, changes, month, now)` | config, change history, month → minor amount | Ended month = amount in force at start of next month; running = current (`docs/05` §5.2; `docs/04` §6.4) |
 | `order_payments(payments)` | payments → ordered payments | date/time asc, amount asc, internal id; null time = 00:00 tz (`docs/05` §6.2) |
 | `allocate(bills, payments)` | state → allocation plan + advance events | Oldest bill first; one allocation per fill; remainder → `created` (`docs/05` §6.3–6.4, §7.1) |
 | `apply_advance(bills, remainders)` | state → allocation plan + `applied` events | Oldest remainder first, oldest bill first (`docs/05` §7.2) |
 | `reverse_allocation(allocation)` | one allocation → reversal row + one `created` movement | Samuel's ruling R1; the only reversal-to-advance primitive (`docs/05` §7.4, §11.2) |
-| `rate_change_plan(bills, payments, config, changes, new_amount, now)` | state + new amount → adjustments + reversals + advance + new standard amount | Current-month active bills only; rise/drop semantics; persists the new standard amount for following months (`docs/05` §5.3) |
-| `write_off_plan(tenancy, bills, net_allocated_by_bill)` | closed tenancy + its bills + net → one adjustment per bill with a balance | Whole-tenancy action; `previous_amount_minor` = before, `new_amount_minor` = net allocated (Samuel's rulings M3 and S5; `docs/05` §5.3, §8.4, §11.1) |
+| `rate_change_plan(bills, payments, config, changes, new_amount, now)` | state + new amount → adjustments + reversals + advance + new standard amount | Current-month active bills only, excluding any bill with a write-off adjustment (a written-off bill is final); rise/drop semantics; persists the new standard amount for following months (`docs/05` §5.3, §9) |
+| `write_off_plan(tenancy, bills, net_allocated_by_bill)` | closed tenancy + its bills + net → one adjustment per bill with a balance | Whole-tenancy action, closed tenancy only; `previous_amount_minor` = before, `new_amount_minor` = net allocated (Samuel's rulings M3 and S5; `docs/05` §5.3, §8.4, §11.1) |
+| `move_in_write_off_plan(tenancy, bills, net_allocated_by_bill)` | active or closed tenancy + its bills + net → one adjustment on the move-in month bill, or a refusal | One `write_off` on that bill only, no chosen amount, no other bill; refuse when the bill is missing or has nothing outstanding (Samuel's ruling S8; `docs/05` §5.3, §5.4; §15 item 19) |
 | `complete_reversal_plan(payment, allocations, movements, match)` | state → reversals + `reversed` advances + reversal match | `docs/05` §12.1; `docs/04` §8.12 |
 | `correct_match_plan(payment, allocations, movements, match, new_tenancy)` | state → reversal + unmatch + new match + allocations | Samuel's ruling R2; `docs/05` §6.9, §12, §13 |
 | `bill_status(final_amount, net_allocated, has_write_off)` | values → status | Final-0 checks first; signed net per `docs/04` §7.1 (`docs/05` §8.1–8.4) |
@@ -44,6 +45,7 @@ Every method loads its domain state, calls the pure functions, writes the plan, 
 | `confirm_import_batch(batch_id)` | call `ensure_bills_through` **inside this transaction**; lock the `import_batch` row and re-check status; then allocation | `docs/03` §5.2.1 (consumes matched payments only); a double confirm allocates once |
 | `confirm_rate_change(new_amount, admin_id, note, now)` | same lock order; **no** `ensure_bills_through`; persist the new standard amount, adjustments, reversals and `created`/`applied` movements; run `reconcile` for every touched payment | `docs/05` §5.3, §6.9, §7.4 |
 | `record_write_off(tenancy_id, admin_id, note)` | same lock order; refuse if the tenancy is not closed; one `write_off` adjustment per bill with a balance; one audit entry per adjustment; auto public note + optional custom note | `docs/05` §5.3, §11.1; Samuel's ruling S5 |
+| `record_move_in_write_off(tenancy_id, admin_id, note)` | same lock order; one `write_off` adjustment on the tenancy's move-in month bill (active or closed); one audit entry; auto public note + optional custom note; refuse and write nothing if the bill is missing or has nothing outstanding | `docs/05` §5.3, §5.4, §8.4; §15 item 19; Samuel's ruling S8 |
 | `complete_reversal(transaction_id, admin_id)` | reverse allocations (R1), append `reversed` advances, append reversal match, apply other-payment advance to bills that owe again, including a `closed` tenancy whose own advance pays its own bills generated after closure (Samuel's ruling S7), run `reconcile` | `docs/05` §7.2, §7.5, §12.1; `docs/04` §8.12 |
 | `correct_match(transaction_id, new_tenancy_id, admin_id)` | reverse allocations, clear advance, reverse-match, new match, re-allocate, apply other-payment advance to bills that owe again, including a `closed` tenancy whose own advance pays its own bills generated after closure (Samuel's ruling S7), run `reconcile`, write the audit entry in the same transaction | Samuel's ruling R2; `docs/05` §6.9, §7.2, §7.5, §13 |
 | `match_manually(transaction_id, tenancy_id, admin_id)` | append match, then allocate | `docs/05` §12, §13 |
@@ -51,7 +53,7 @@ Every method loads its domain state, calls the pure functions, writes the plan, 
 Contract rules:
 - `transaction` rows are never updated or deleted (spec FR-059; `docs/04` §11.1).
 - `monthly_bill.final_amount_minor` is written only together with its `bill_adjustment` (`docs/04` §8.7).
-- Every mutating method writes its `audit_log` entry; a whole-tenancy write-off writes one audit entry per adjustment (`docs/05` §12, §13; `docs/04` §6.5, §6.9).
+- Every mutating method writes its `audit_log` entry; a whole-tenancy write-off writes one audit entry per adjustment, and a move-in month bill write-off writes one (`docs/05` §12, §13; `docs/04` §6.5, §6.9).
 - Every read and write filters `organization_id` (`docs/04` §8.9).
 
 ## 3. Read-only view contract (`views.py`)
